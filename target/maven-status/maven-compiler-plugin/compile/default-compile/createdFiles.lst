@@ -1,7 +1,0 @@
-com/baskettecase/textProc/config/ProcessorProperties$Standalone.class
-com/baskettecase/textProc/config/ProcessorProperties$CloudFoundry.class
-com/baskettecase/textProc/config/ProcessorProperties.class
-com/baskettecase/textProc/TextProcApplication.class
-com/baskettecase/textProc/processor/StandaloneDirectoryProcessor.class
-com/baskettecase/textProc/config/ProcessorProperties$K8s.class
-com/baskettecase/textProc/service/ExtractionService.class
