@@ -14,6 +14,11 @@ import java.nio.file.*;
 import java.util.stream.Stream;
 
 @Component
+/**
+ * StandaloneDirectoryProcessor processes files in a directory using Apache Tika and custom extraction logic.
+ * Activated only under the 'standalone' Spring profile. It monitors the input directory, processes files,
+ * and moves them to output, error, or processed directories based on processing results.
+ */
 @Profile("standalone") // Only active for 'standalone' profile
 public class StandaloneDirectoryProcessor implements CommandLineRunner {
 
@@ -22,11 +27,21 @@ public class StandaloneDirectoryProcessor implements CommandLineRunner {
     private final ProcessorProperties.Standalone standaloneProps;
     private final ExtractionService extractionService;
 
+    /**
+     * Constructs a StandaloneDirectoryProcessor with injected configuration and extraction service.
+     * @param processorProperties Configuration properties for processor directories and mode.
+     * @param extractionService Service for extracting text from files.
+     */
     public StandaloneDirectoryProcessor(ProcessorProperties processorProperties, ExtractionService extractionService) {
         this.standaloneProps = processorProperties.getStandalone();
         this.extractionService = extractionService;
     }
 
+    /**
+     * Entry point for the standalone processor. Logs configuration, ensures directories exist,
+     * and processes all files found in the input directory.
+     * @param args Command-line arguments (unused).
+     */
     @Override
     public void run(String... args) throws Exception {
         logger.info("--- STANDALONE MODE ACTIVATED ---");
@@ -50,6 +65,10 @@ public class StandaloneDirectoryProcessor implements CommandLineRunner {
         logger.info("--- STANDALONE MODE FINISHED ---");
     }
 
+    /**
+     * Processes a single file: extracts text, writes output, and moves the file to processed or error directories.
+     * @param filePath Path to the file to process.
+     */
     private void processFile(Path filePath) {
         logger.info("Processing file: {}", filePath.getFileName());
         Path outputDir = Paths.get(standaloneProps.getOutputDirectory());
@@ -80,6 +99,12 @@ public class StandaloneDirectoryProcessor implements CommandLineRunner {
         }
     }
 
+    /**
+     * Moves a file to a target directory and logs the action.
+     * @param sourceFile The file to move.
+     * @param targetFile The destination path.
+     * @param type The type of move ("processed" or "error").
+     */
     private void moveToDirectory(Path sourceFile, Path targetFile, String type) {
         try {
             Files.move(sourceFile, targetFile, StandardCopyOption.REPLACE_EXISTING);
