@@ -18,7 +18,7 @@
 - ⚡ Fast and flexible directory-based text extraction
 - 🤖 Spring AI integration (configurable for future LLM/AI enhancements)
 - 📄 Apache Tika-powered document parsing
-- 🔄 Profile-based configuration (standalone, k8s, cf)
+- 🔄 Profile-based configuration (standalone, scdf)
 - 📂 Automatic directory management and error handling
 - 📝 Easy to extend and customize
 
@@ -36,8 +36,7 @@ textProc/
 ├── src/main/resources/
 │   ├── application.properties
 │   ├── application-standalone.properties
-│   ├── application-k8s.properties
-│   └── application-cf.properties
+│   └── application-scdf.properties
 ├── data/                               # Input, output, error, and processed files (gitignored)
 ├── pom.xml                             # Maven build file
 └── README.md
@@ -75,9 +74,18 @@ app.processor.standalone.error-directory=./data/error_files
 app.processor.standalone.processed-directory=./data/processed_files
 ```
 
+Example for Spring Cloud Data Flow (SCDF) mode:
+
+```properties
+# src/main/resources/application-scdf.properties
+app.processor.mode=scdf
+app.processor.scdf.input-channel=textProcInput
+app.processor.scdf.output-channel=textProcOutput
+```
+
 Switch profiles with:
 ```sh
--Dspring.profiles.active=standalone   # or k8s, cf
+-Dspring.profiles.active=standalone   # or scdf
 ```
 
 ---

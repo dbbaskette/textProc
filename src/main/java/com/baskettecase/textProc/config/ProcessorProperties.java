@@ -15,8 +15,7 @@ public class ProcessorProperties {
     private String mode = "standalone"; // Default mode
 
     private Standalone standalone = new Standalone();
-    private K8s k8s = new K8s();
-    private CloudFoundry cf = new CloudFoundry();
+    private Scdf scdf = new Scdf();
 
     // Getters and Setters
     public String getMode() {
@@ -35,20 +34,12 @@ public class ProcessorProperties {
         this.standalone = standalone;
     }
 
-    public K8s getK8s() {
-        return k8s;
+    public Scdf getScdf() {
+        return scdf;
     }
 
-    public void setK8s(K8s k8s) {
-        this.k8s = k8s;
-    }
-
-    public CloudFoundry getCf() {
-        return cf;
-    }
-
-    public void setCf(CloudFoundry cf) {
-        this.cf = cf;
+    public void setScdf(Scdf scdf) {
+        this.scdf = scdf;
     }
 
     // Nested static classes for mode-specific properties
@@ -72,25 +63,19 @@ public class ProcessorProperties {
         public void setProcessedDirectory(String processedDirectory) { this.processedDirectory = processedDirectory; }
     }
 
-    public static class K8s {
-        // Define K8s specific properties, e.g., related to PVC, config maps, or SCDF stream properties
-        private String sourceTopic; // Example
-        private String sinkTopic;   // Example
-
-        public String getSourceTopic() { return sourceTopic; }
-        public void setSourceTopic(String sourceTopic) { this.sourceTopic = sourceTopic; }
-        public String getSinkTopic() { return sinkTopic; }
-        public void setSinkTopic(String sinkTopic) { this.sinkTopic = sinkTopic; }
-    }
-
-    public static class CloudFoundry {
-        // Define CF specific properties, e.g., related to service bindings or SCDF stream properties
-        private String inputChannel;  // Example
-        private String outputChannel; // Example
+    /**
+     * Properties for Spring Cloud Data Flow (SCDF) mode.
+     * Example: input/output channels for SCDF stream integration.
+     */
+    public static class Scdf {
+        private String inputChannel;
+        private String outputChannel;
 
         public String getInputChannel() { return inputChannel; }
         public void setInputChannel(String inputChannel) { this.inputChannel = inputChannel; }
         public String getOutputChannel() { return outputChannel; }
         public void setOutputChannel(String outputChannel) { this.outputChannel = outputChannel; }
     }
+
+
 }
