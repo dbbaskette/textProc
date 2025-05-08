@@ -16,8 +16,12 @@ import java.util.stream.Stream;
 @Component
 /**
  * StandaloneDirectoryProcessor processes files in a directory using Apache Tika and custom extraction logic.
- * Activated only under the 'standalone' Spring profile. It monitors the input directory, processes files,
- * and moves them to output, error, or processed directories based on processing results.
+ * <p>
+ * Activated only under the 'standalone' Spring profile. Monitors the input directory, processes files, and moves them
+ * to output, error, or processed directories based on processing results. Handles all directory creation automatically.
+ * <p>
+ * Error handling ensures files causing exceptions are moved to the error directory and logs are written for all steps.
+ * Uses {@link ExtractionService} for text extraction.
  */
 @Profile("standalone") // Only active for 'standalone' profile
 public class StandaloneDirectoryProcessor implements CommandLineRunner {

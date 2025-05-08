@@ -18,7 +18,32 @@ import java.nio.file.StandardCopyOption;
 import java.util.function.Function;
 
 /**
- * SCDF Stream Processor for "scdf" profile. Receives S3 object references, downloads files, extracts text, and outputs results.
+ * Spring Cloud Data Flow (SCDF) Stream Processor.
+ * <p>
+ * This component is activated under the 'scdf' Spring profile and is designed to work as a message-driven processor for SCDF pipelines.
+ * It listens for incoming messages (typically from RabbitMQ), expects a JSON payload with S3/MinIO object references,
+ * downloads the referenced file, extracts its text using Apache Tika, and outputs the result.
+ * <p>
+ * Environment Variables:
+ * <ul>
+ *   <li><b>S3_ENDPOINT</b>: URL for MinIO/S3 (default: http://localhost:9000)</li>
+ *   <li><b>S3_ACCESS_KEY</b>: Access key for MinIO/S3 (required)</li>
+ *   <li><b>S3_SECRET_KEY</b>: Secret key for MinIO/S3 (required)</li>
+ * </ul>
+ *
+ * Message Structure:
+ * <ul>
+ *   <li>Input: JSON with fields <code>bucketName</code> and <code>key</code> (object name)</li>
+ *   <li>Output: Extracted text as message payload</li>
+ * </ul>
+ *
+ * Error Handling:
+ * <ul>
+ *   <li>Logs and returns empty payload on JSON parse, download, or extraction errors</li>
+ *   <li>Deletes temporary files after processing</li>
+ * </ul>
+ *
+ * See {@link ExtractionService} for extraction logic.
  */
 @Component
 @Profile("scdf")
@@ -27,6 +52,12 @@ public class ScdfStreamProcessor {
     private final ExtractionService extractionService;
     private final MinioClient minioClient;
 
+    /**
+     * Constructs the SCDF Stream Processor.
+     *
+     * @param extractionService Service for text extraction from files (Apache Tika-based).
+     * @throws IllegalStateException if S3_ACCESS_KEY or S3_SECRET_KEY are missing in the environment.
+     */
     public ScdfStreamProcessor(ExtractionService extractionService) {
         this.extractionService = extractionService;
 
@@ -51,6 +82,22 @@ public class ScdfStreamProcessor {
      */
     @Profile("scdf")
     @Bean
+    /**
+     * Spring Cloud Stream Function bean.
+     * <p>
+     * Listens for messages containing JSON payloads with S3/MinIO object references, downloads the file, extracts text, and returns the result.
+     *
+     * @return Function that processes messages and emits extracted text.
+     *
+     * <b>Expected input message:</b>
+     * <pre>{ "bucketName": "mybucket", "key": "myfile.pdf" }</pre>
+     *
+     * <b>Error handling:</b>
+     * <ul>
+     *   <li>Returns empty payload on JSON parse, download, or extraction errors</li>
+     *   <li>All errors are logged</li>
+     * </ul>
+     */
     public Function<Message<String>, Message<String>> textProc() {
         logger.atDebug().log("SCDF mode activated in FUNCTION");
         return inputMsg -> {

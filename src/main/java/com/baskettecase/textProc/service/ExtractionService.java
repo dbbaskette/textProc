@@ -20,6 +20,12 @@ import java.nio.file.Path;
  * ExtractionService provides utilities to extract text content from files using Apache Tika.
  * Supports both advanced and simple extraction methods.
  */
+/**
+ * ExtractionService provides utilities to extract text content from files using Apache Tika.
+ * <p>
+ * Supports both advanced (metadata-aware) and simple extraction methods. Used by both standalone and SCDF profiles.
+ * Logs all extraction attempts and errors.
+ */
 @Service
 public class ExtractionService {
 
@@ -35,6 +41,13 @@ public class ExtractionService {
      */
     /**
      * Extracts text content from a file using Apache Tika's AutoDetectParser for advanced parsing and metadata.
+     * @param filePath The path to the file.
+     * @return The extracted text content, or null if an error occurs during parsing.
+     * @throws IOException If an I/O error occurs reading the file.
+     */
+    /**
+     * Extracts text content from a file using Apache Tika's AutoDetectParser for advanced parsing and metadata.
+     *
      * @param filePath The path to the file.
      * @return The extracted text content, or null if an error occurs during parsing.
      * @throws IOException If an I/O error occurs reading the file.
@@ -71,6 +84,14 @@ public class ExtractionService {
      */
     /**
      * Extracts text using Tika's simple facade for quick text extraction.
+     * @param filePath The path to the file.
+     * @return The extracted text content.
+     * @throws IOException   If an I/O error occurs.
+     * @throws TikaException If a Tika parsing error occurs.
+     */
+    /**
+     * Extracts text using Tika's simple facade for quick text extraction.
+     *
      * @param filePath The path to the file.
      * @return The extracted text content.
      * @throws IOException   If an I/O error occurs.

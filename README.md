@@ -46,6 +46,32 @@ textProc/
 
 ## 🛠️ Getting Started
 
+### Docker Build and Multi-Arch Images
+
+You can build, push, and pull multi-architecture Docker images using the included `dockerbuild.sh` script:
+
+```sh
+./dockerbuild.sh <dockerhub-username> <image-name> [tag]
+```
+
+- Builds the Spring Boot JAR
+- Builds and pushes a multi-arch (amd64/arm64) Docker image
+- Pulls the image after push to verify success
+
+### Troubleshooting
+
+If you see errors like `NoSuchMethodError` for `TarArchiveInputStream.getNextEntry()` from Tika, ensure you have `commons-compress` version 1.21+ (this project uses 1.26.1). See `pom.xml` for details.
+
+### SCDF (Spring Cloud Data Flow) Integration
+
+This project supports SCDF profile for event-driven processing via RabbitMQ. To use:
+- Set `app.processor.mode=scdf` in `application-scdf.properties`
+- Configure input/output channels if needed
+- Ensure MinIO/S3 environment variables are set for object storage
+
+See code and comments in `ScdfStreamProcessor.java` for details.
+
+
 ### Prerequisites
 - Java 21+
 - Maven 3.8+
