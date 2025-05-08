@@ -1,21 +1,17 @@
 package com.baskettecase.textProc.processor;
 
-import com.baskettecase.textProc.config.ProcessorProperties;
 import com.baskettecase.textProc.service.ExtractionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Profile;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Component;
-import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
-import software.amazon.awssdk.core.ResponseInputStream;
-import software.amazon.awssdk.regions.Region;
-import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.GetObjectRequest;
-import software.amazon.awssdk.services.s3.model.S3Object;
-
+import io.minio.MinioClient;
+import io.minio.GetObjectArgs;
 import java.io.IOException;
+import java.security.InvalidKeyException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -29,50 +25,69 @@ import java.util.function.Function;
 public class ScdfStreamProcessor {
     private static final Logger logger = LoggerFactory.getLogger(ScdfStreamProcessor.class);
     private final ExtractionService extractionService;
-    private final S3Client s3Client;
+    private final MinioClient minioClient;
 
     public ScdfStreamProcessor(ExtractionService extractionService) {
         this.extractionService = extractionService;
-        // Region can be made configurable via properties
-        this.s3Client = S3Client.builder()
-                .region(Region.US_EAST_1) // TODO: Make configurable
-                .credentialsProvider(DefaultCredentialsProvider.create())
+
+        // Read MinIO config from environment variables
+        String endpoint = System.getenv().getOrDefault("S3_ENDPOINT", "http://localhost:9000");
+        String accessKey = System.getenv("S3_ACCESS_KEY");
+        String secretKey = System.getenv("S3_SECRET_KEY");
+        logger.atDebug().log("MinIO config: endpoint={}, accessKey={}, secretKey={}", endpoint, accessKey, secretKey);
+        if (accessKey == null || secretKey == null) {
+            throw new IllegalStateException("S3_ACCESS_KEY and S3_SECRET_KEY environment variables must be set");
+        }
+
+        this.minioClient = MinioClient.builder()
+                .endpoint(endpoint)
+                .credentials(accessKey, secretKey)
                 .build();
     }
 
     /**
      * Spring Cloud Stream Function: receives S3 reference as input, outputs extracted text.
-     * Input message payload should be a JSON string: {"bucket":"...","key":"..."}
+     * Input message payload should be 'bucket/filename' (e.g., mybucket/myfile.pdf)
      */
-    @org.springframework.context.annotation.Bean
-    public Function<Message<String>, Message<String>> processS3File() {
+    @Profile("scdf")
+    @Bean
+    public Function<Message<String>, Message<String>> textProc() {
+        logger.atDebug().log("SCDF mode activated in FUNCTION");
         return inputMsg -> {
             String payload = inputMsg.getPayload();
             String bucket;
             String key;
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
             try {
-                // Simple JSON parsing (replace with Jackson if desired)
-                int bIdx = payload.indexOf("\"bucket\":");
-                int kIdx = payload.indexOf("\"key\":");
-                if (bIdx == -1 || kIdx == -1) throw new IllegalArgumentException("Invalid input JSON: " + payload);
-                bucket = payload.split("\"bucket\":\"")[1].split("\"")[0];
-                key = payload.split("\"key\":\"")[1].split("\"")[0];
+                com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(payload);
+                bucket = root.get("bucketName").asText();
+                key = root.get("key").asText();
             } catch (Exception e) {
-                logger.error("Failed to parse S3 reference from message: {}", payload, e);
+                logger.error("Failed to parse bucketName/key from JSON message: {}", payload, e);
                 return MessageBuilder.withPayload("").build();
             }
             logger.info("Processing S3 object: {}/{}", bucket, key);
 
-            // Download S3 object to temp file
+            // Download object from MinIO to /tmp/<bucketName>/<key>
+            Path bucketDir = Path.of("/tmp", bucket);
             Path tempFile;
             try {
-                tempFile = Files.createTempFile("s3file-", "-input");
-                GetObjectRequest req = GetObjectRequest.builder().bucket(bucket).key(key).build();
-                try (ResponseInputStream<?> s3is = s3Client.getObject(req)) {
-                    Files.copy(s3is, tempFile, StandardCopyOption.REPLACE_EXISTING);
+                Files.createDirectories(bucketDir);
+                tempFile = bucketDir.resolve(key);
+                try (var stream = minioClient.getObject(
+                        GetObjectArgs.builder().bucket(bucket).object(key).build())) {
+                    Files.copy(stream, tempFile, StandardCopyOption.REPLACE_EXISTING);
                 }
-            } catch (IOException e) {
-                logger.error("Error downloading S3 object: {}/{}", bucket, key, e);
+            } catch (io.minio.errors.ErrorResponseException |
+                     io.minio.errors.InsufficientDataException |
+                     io.minio.errors.InternalException |
+                     io.minio.errors.InvalidResponseException |
+                     io.minio.errors.ServerException |
+                     io.minio.errors.XmlParserException |
+                     java.security.InvalidKeyException |
+                     java.security.NoSuchAlgorithmException |
+                     IOException e) {
+                logger.error("Error downloading MinIO object: {}/{}", bucket, key, e);
                 return MessageBuilder.withPayload("").build();
             }
 
@@ -92,3 +107,4 @@ public class ScdfStreamProcessor {
         };
     }
 }
+    

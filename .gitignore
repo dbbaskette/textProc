@@ -4,7 +4,13 @@
 # Application data directory
 data/
 
-# IDE and OS files
+# Compiled class file
+*.class
+
+# Local environment/script files
+setVars.sh
+build.sh
+dockerbuild.sh  
 /.idea/
 *.iml
 .DS_Store

@@ -15,7 +15,6 @@ public class ProcessorProperties {
     private String mode = "standalone"; // Default mode
 
     private Standalone standalone = new Standalone();
-    private Scdf scdf = new Scdf();
 
     // Getters and Setters
     public String getMode() {
@@ -34,14 +33,7 @@ public class ProcessorProperties {
         this.standalone = standalone;
     }
 
-    public Scdf getScdf() {
-        return scdf;
-    }
-
-    public void setScdf(Scdf scdf) {
-        this.scdf = scdf;
-    }
-
+  
     // Nested static classes for mode-specific properties
     public static class Standalone {
         @NotBlank
@@ -63,19 +55,7 @@ public class ProcessorProperties {
         public void setProcessedDirectory(String processedDirectory) { this.processedDirectory = processedDirectory; }
     }
 
-    /**
-     * Properties for Spring Cloud Data Flow (SCDF) mode.
-     * Example: input/output channels for SCDF stream integration.
-     */
-    public static class Scdf {
-        private String inputChannel;
-        private String outputChannel;
 
-        public String getInputChannel() { return inputChannel; }
-        public void setInputChannel(String inputChannel) { this.inputChannel = inputChannel; }
-        public String getOutputChannel() { return outputChannel; }
-        public void setOutputChannel(String outputChannel) { this.outputChannel = outputChannel; }
-    }
 
 
 }
