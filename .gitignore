@@ -10,7 +10,7 @@ data/
 # Local environment/script files
 setVars.sh
 build.sh
-dockerbuild.sh  
+# dockerbuild.sh  
 /.idea/
 *.iml
 .DS_Store
