@@ -1,6 +1,9 @@
 package com.baskettecase.textProc.processor;
 
 import com.baskettecase.textProc.service.ExtractionService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
@@ -10,12 +13,21 @@ import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Component;
 import io.minio.MinioClient;
 import io.minio.GetObjectArgs;
+
 import java.io.IOException;
-import java.security.InvalidKeyException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 /**
  * Spring Cloud Data Flow (SCDF) Stream Processor.
@@ -49,8 +61,29 @@ import java.util.function.Function;
 @Profile("scdf")
 public class ScdfStreamProcessor {
     private static final Logger logger = LoggerFactory.getLogger(ScdfStreamProcessor.class);
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+    
     private final ExtractionService extractionService;
-    private final MinioClient minioClient;
+    private MinioClient minioClient = null;
+    private final Map<String, Boolean> processedFiles = new ConcurrentHashMap<>();
+    
+    private String getFileKey(String url) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(url.getBytes());
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
+            }
+            return hexString.toString();
+        } catch (NoSuchAlgorithmException e) {
+            // Fallback to URL if hashing fails (shouldn't happen with SHA-256)
+            return url;
+        }
+    }
+
 
     /**
      * Constructs the SCDF Stream Processor.
@@ -60,97 +93,217 @@ public class ScdfStreamProcessor {
      */
     public ScdfStreamProcessor(ExtractionService extractionService) {
         this.extractionService = extractionService;
-
-        // Read MinIO config from environment variables
-        String endpoint = System.getenv().getOrDefault("S3_ENDPOINT", "http://localhost:9000");
-        String accessKey = System.getenv("S3_ACCESS_KEY");
-        String secretKey = System.getenv("S3_SECRET_KEY");
-        logger.atDebug().log("MinIO config: endpoint={}, accessKey={}, secretKey={}", endpoint, accessKey, secretKey);
-        if (accessKey == null || secretKey == null) {
-            throw new IllegalStateException("S3_ACCESS_KEY and S3_SECRET_KEY environment variables must be set");
-        }
-
-        this.minioClient = MinioClient.builder()
-                .endpoint(endpoint)
-                .credentials(accessKey, secretKey)
-                .build();
     }
 
     /**
      * Spring Cloud Stream Function: receives S3 reference as input, outputs extracted text.
      * Input message payload should be 'bucket/filename' (e.g., mybucket/myfile.pdf)
      */
+    private MinioClient getMinioClient() {
+        if (minioClient == null) {
+            String endpoint = System.getenv().getOrDefault("S3_ENDPOINT", "http://localhost:9000");
+            String accessKey = System.getenv("S3_ACCESS_KEY");
+            String secretKey = System.getenv("S3_SECRET_KEY");
+            logger.atDebug().log("MinIO config: endpoint={}, accessKey={}, secretKey={}", endpoint, accessKey, "***");
+            if (accessKey == null || secretKey == null) {
+                throw new IllegalStateException("S3_ACCESS_KEY and S3_SECRET_KEY environment variables must be set");
+            }
+            minioClient = MinioClient.builder()
+                    .endpoint(endpoint)
+                    .credentials(accessKey, secretKey)
+                    .build();
+        }
+        return minioClient;
+    }
+    
+    private String processS3File(JsonNode root) throws Exception {
+        String bucket = root.get("bucket").asText();
+        String key = root.get("key").asText();
+        logger.info("Processing S3 object: {}/{}", bucket, key);
+        
+        java.nio.file.Path tempFile = Files.createTempFile("s3-", "-" + key);
+        try (InputStream stream = getMinioClient().getObject(
+                GetObjectArgs.builder().bucket(bucket).object(key).build())) {
+            Files.copy(stream, tempFile, StandardCopyOption.REPLACE_EXISTING);
+            return extractionService.extractTextFromFile(tempFile);
+        } finally {
+            Files.deleteIfExists(tempFile);
+        }
+    }
+    
+    /**
+     * Downloads a file from WebHDFS to a local temporary file and returns the path.
+     * The caller is responsible for cleaning up the temporary file.
+     */
+    private Path downloadHdfsFile(String webhdfsUrl) throws IOException {
+        logger.info("Downloading WebHDFS file: {}", webhdfsUrl);
+
+        // Ensure the URL has the op=OPEN parameter
+        String url = webhdfsUrl;
+        if (!url.contains("op=OPEN")) {
+            url += (url.contains("?") ? "&" : "?") + "op=OPEN";
+        }
+
+        // Create a temporary file with a meaningful prefix/suffix
+        Path tempFile = Files.createTempFile("hdfs-download-", ".dat");
+        logger.debug("Created temporary file: {}", tempFile);
+
+        try (InputStream in = java.net.URI.create(url).toURL().openStream()) {
+            // Copy with progress logging
+            long bytesCopied = Files.copy(in, tempFile, StandardCopyOption.REPLACE_EXISTING);
+            logger.info("Downloaded {} bytes to {}", bytesCopied, tempFile);
+            return tempFile;
+        } catch (IOException e) {
+            // Clean up the temp file if there was an error
+            try {
+                Files.deleteIfExists(tempFile);
+            } catch (IOException deleteEx) {
+                logger.warn("Failed to delete temporary file after download error", deleteEx);
+            }
+            throw new IOException("Failed to download file from " + url, e);
+        }
+    }
+
+    //private static final int CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+    private static final int CHUNK_SIZE = 1024 * 256; // 256KB chunks
+    
+    private Stream<String> processHdfsFileInChunks(String webhdfsUrl) throws IOException {
+        logger.info("Processing WebHDFS file in chunks: {}", webhdfsUrl);
+        logger.info("Using chunk size: {} bytes ({} KB)", CHUNK_SIZE, CHUNK_SIZE / 1024);
+        
+        // Download the file first
+        final Path tempFile = downloadHdfsFile(webhdfsUrl);
+        
+        try {
+            // Get file size for logging
+            long fileSize = Files.size(tempFile);
+            long estimatedChunks = (fileSize + CHUNK_SIZE - 1) / CHUNK_SIZE; // Ceiling division
+            
+            logger.info("Document size: {} bytes ({} MB), estimated chunks: {}", 
+                      fileSize, 
+                      String.format("%.2f", fileSize / (1024.0 * 1024.0)),
+                      estimatedChunks);
+            
+            // Process the downloaded file in chunks
+            return extractionService.extractTextInChunks(tempFile, CHUNK_SIZE)
+                .onClose(() -> cleanupTempFile(tempFile));
+        } catch (Exception e) {
+            // Ensure temp file is cleaned up on error
+            cleanupTempFile(tempFile);
+            throw e;
+        }
+    }
+    
+    /**
+     * Helper method to clean up temporary files.
+     * @param tempFile The temporary file to clean up
+     */
+    private void cleanupTempFile(Path tempFile) {
+        if (tempFile != null) {
+            try {
+                Files.deleteIfExists(tempFile);
+                logger.debug("Deleted temporary file: {}", tempFile);
+            } catch (IOException e) {
+                logger.warn("Failed to delete temporary file: " + tempFile, e);
+            }
+        }
+    }
+    
+    // Kept for backward compatibility
+    private String processHdfsFile(String webhdfsUrl) throws IOException {
+        try (Stream<String> chunks = processHdfsFileInChunks(webhdfsUrl)) {
+            // Combine all chunks into a single string (use with caution for large files)
+            return chunks.collect(java.util.stream.Collectors.joining());
+        }
+    }
+
     @Profile("scdf")
     @Bean
     /**
-     * Spring Cloud Stream Function bean.
-     * <p>
-     * Listens for messages containing JSON payloads with S3/MinIO object references, downloads the file, extracts text, and returns the result.
-     *
-     * @return Function that processes messages and emits extracted text.
-     *
-     * <b>Expected input message:</b>
-     * <pre>{ "bucketName": "mybucket", "key": "myfile.pdf" }</pre>
-     *
-     * <b>Error handling:</b>
-     * <ul>
-     *   <li>Returns empty payload on JSON parse, download, or extraction errors</li>
-     *   <li>All errors are logged</li>
-     * </ul>
+     * Spring Cloud Stream Function that processes files from either S3 or HDFS based on input message.
+     * 
+     * Expected JSON input formats:
+     * - S3: {"type":"S3", "bucket":"mybucket", "key":"path/to/file.pdf"}
+     * - HDFS: {"type":"HDFS", "url":"hdfs://namenode:8020/path/to/file.pdf"}
+     * 
+     * @return Function that processes messages and returns extracted text
      */
     public Function<Message<String>, Message<String>> textProc() {
-        logger.atDebug().log("SCDF mode activated in FUNCTION");
         return inputMsg -> {
             String payload = inputMsg.getPayload();
-            String bucket;
-            String key;
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            logger.debug("Received message: {}", payload);
+            
             try {
-                com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(payload);
-                bucket = root.get("bucketName").asText();
-                key = root.get("key").asText();
-            } catch (Exception e) {
-                logger.error("Failed to parse bucketName/key from JSON message: {}", payload, e);
-                return MessageBuilder.withPayload("").build();
-            }
-            logger.info("Processing S3 object: {}/{}", bucket, key);
+                JsonNode root = objectMapper.readTree(payload);
+                String type = root.path("type").asText("");
+                String webhdfsUrl;
 
-            // Download object from MinIO to /tmp/<bucketName>/<key>
-            Path bucketDir = Path.of("/tmp", bucket);
-            Path tempFile;
-            try {
-                Files.createDirectories(bucketDir);
-                tempFile = bucketDir.resolve(key);
-                try (var stream = minioClient.getObject(
-                        GetObjectArgs.builder().bucket(bucket).object(key).build())) {
-                    Files.copy(stream, tempFile, StandardCopyOption.REPLACE_EXISTING);
+                switch (type.toUpperCase()) {
+                    case "S3":
+                        // For S3, we'll keep the existing behavior for now
+                        String extractedText = processS3File(root);
+                        logger.info("Extraction complete ({} chars)", extractedText.length());
+                        return MessageBuilder.withPayload(extractedText).build();
+                        
+                    case "HDFS":
+                        webhdfsUrl = root.path("url").asText();
+                        if (webhdfsUrl == null || webhdfsUrl.trim().isEmpty()) {
+                            throw new IllegalArgumentException("Missing or empty 'url' field for HDFS type");
+                        }
+                        
+                        // Check if we've already processed this file
+                        String fileKey = getFileKey(webhdfsUrl);
+                        if (processedFiles.containsKey(fileKey)) {
+                            logger.info("Skipping already processed file: {}", webhdfsUrl);
+                            return MessageBuilder.withPayload("").build();
+                        }
+                        processedFiles.put(fileKey, true);
+                        logger.info("Processing new file: {}", webhdfsUrl);
+                        
+                        // Process in chunks and send each chunk as a separate message
+                        List<String> chunks = processHdfsFileInChunks(webhdfsUrl).collect(Collectors.toList());
+                        
+                        if (chunks.isEmpty()) {
+                            logger.warn("No chunks were generated for file: {}", webhdfsUrl);
+                            return MessageBuilder.withPayload("").build();
+                        }
+                        
+                        // Log chunk information
+                        logger.info("Processed {} chunks for file: {}", chunks.size(), webhdfsUrl);
+                        for (int i = 0; i < chunks.size(); i++) {
+                            logger.debug("Chunk {} size: {} characters", i, chunks.get(i).length());
+                        }
+                        
+                        // Return the first chunk immediately
+                        String firstChunk = chunks.get(0);
+                        logger.info("Returning first chunk of size: {} characters", firstChunk.length());
+                        
+                        // Process remaining chunks asynchronously if there are any
+                        if (chunks.size() > 1) {
+                            CompletableFuture.runAsync(() -> {
+                                try {
+                                    for (int i = 1; i < chunks.size(); i++) {
+                                        String chunk = chunks.get(i);
+                                        logger.info("Processing chunk {} of size: {} characters", i, chunk.length());
+                                        // Here you would send each chunk to the output channel
+                                        // Example: outputChannel.send(MessageBuilder.withPayload(chunk).build());
+                                    }
+                                } catch (Exception e) {
+                                    logger.error("Error processing remaining chunks", e);
+                                }
+                            });
+                        }
+                        
+                        return MessageBuilder.withPayload(firstChunk).build();
+                        
+                    default:
+                        throw new IllegalArgumentException("Unsupported file source type: " + type);
                 }
-            } catch (io.minio.errors.ErrorResponseException |
-                     io.minio.errors.InsufficientDataException |
-                     io.minio.errors.InternalException |
-                     io.minio.errors.InvalidResponseException |
-                     io.minio.errors.ServerException |
-                     io.minio.errors.XmlParserException |
-                     java.security.InvalidKeyException |
-                     java.security.NoSuchAlgorithmException |
-                     IOException e) {
-                logger.error("Error downloading MinIO object: {}/{}", bucket, key, e);
+                
+            } catch (Exception e) {
+                logger.error("Error processing message: {}", e.getMessage(), e);
                 return MessageBuilder.withPayload("").build();
             }
-
-            // Extract text
-            String extractedText;
-            try {
-                extractedText = extractionService.extractTextFromFile(tempFile);
-            } catch (IOException e) {
-                logger.error("Error extracting text from file {}: {}", tempFile, e.getMessage(), e);
-                return MessageBuilder.withPayload("").build();
-            } finally {
-                try { Files.deleteIfExists(tempFile); } catch (IOException ignored) {}
-            }
-
-            logger.info("Extraction complete for {}/{} ({} chars)", bucket, key, extractedText.length());
-            return MessageBuilder.withPayload(extractedText).build();
         };
     }
 }

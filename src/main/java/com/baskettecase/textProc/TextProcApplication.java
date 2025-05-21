@@ -1,8 +1,9 @@
 package com.baskettecase.textProc;
 
 import com.baskettecase.textProc.config.ProcessorProperties;
-import org.springframework.boot.SpringApplication;
+import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 /**
@@ -18,7 +19,9 @@ public class TextProcApplication {
      * @param args Command-line arguments.
      */
     public static void main(String[] args) {
-        SpringApplication.run(TextProcApplication.class, args);
+        new SpringApplicationBuilder(TextProcApplication.class)
+            .web(WebApplicationType.NONE) // Disable web environment
+            .run(args);
     }
 
 }

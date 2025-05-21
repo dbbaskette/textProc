@@ -1,25 +1,21 @@
 package com.baskettecase.textProc.service;
 
-import org.apache.tika.Tika;
-import org.apache.tika.exception.TikaException;
-import org.apache.tika.metadata.Metadata;
-import org.apache.tika.parser.AutoDetectParser;
-import org.apache.tika.parser.ParseContext;
-import org.apache.tika.sax.BodyContentHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.document.Document;
+import org.springframework.ai.document.DocumentReader;
+import org.springframework.ai.reader.tika.TikaDocumentReader;
+import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.stereotype.Service;
-import org.xml.sax.SAXException;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.List;
+import java.util.stream.Stream;
 
-/**
- * ExtractionService provides utilities to extract text content from files using Apache Tika.
- * Supports both advanced and simple extraction methods.
- */
 /**
  * ExtractionService provides utilities to extract text content from files using Apache Tika.
  * <p>
@@ -32,74 +28,122 @@ public class ExtractionService {
     private static final Logger logger = LoggerFactory.getLogger(ExtractionService.class);
 
     /**
-     * Extracts text content from a file using Apache Tika's AutoDetectParser.
-     * This method provides more control and access to metadata.
+     * Extracts text from a file in chunks for streaming.
      *
-     * @param filePath The path to the file.
-     * @return The extracted text content, or null if an error occurs during parsing.
-     * @throws IOException If an I/O error occurs reading the file.
+     * @param filePath The path to the file to extract text from
+     * @param chunkSize The maximum size of each text chunk in bytes
+     * @return A stream of text chunks
+     * @throws IOException If an I/O error occurs
      */
     /**
-     * Extracts text content from a file using Apache Tika's AutoDetectParser for advanced parsing and metadata.
-     * @param filePath The path to the file.
-     * @return The extracted text content, or null if an error occurs during parsing.
-     * @throws IOException If an I/O error occurs reading the file.
-     */
-    /**
-     * Extracts text content from a file using Apache Tika's AutoDetectParser for advanced parsing and metadata.
+     * Extracts text from a file in chunks using Spring AI's TikaDocumentReader and TokenTextSplitter.
      *
-     * @param filePath The path to the file.
-     * @return The extracted text content, or null if an error occurs during parsing.
-     * @throws IOException If an I/O error occurs reading the file.
+     * @param filePath The path to the file to extract text from
+     * @param chunkSize The target size for each text chunk in tokens
+     * @return A stream of text chunks
+     * @throws IOException If an I/O error occurs
+     */
+    public Stream<String> extractTextInChunks(Path filePath, int chunkSize) {
+        long fileSize;
+        try {
+            fileSize = Files.size(filePath);
+            logger.info("Starting text extraction from file: {} (size: {} bytes, {} MB)", 
+                      filePath, fileSize, String.format("%.2f", fileSize / (1024.0 * 1024.0)));
+            
+            // Use Spring AI's TikaDocumentReader to read the document with file URI
+            String fileUri = filePath.toUri().toString();
+            logger.debug("Reading document from URI: {}", fileUri);
+            
+            DocumentReader reader = new TikaDocumentReader(fileUri);
+            List<Document> documents = reader.get();
+            
+            if (documents.isEmpty()) {
+                logger.warn("No content extracted from the document");
+                return Stream.empty();
+            }
+            
+            logger.debug("Successfully extracted document with {} pages", documents.size());
+            
+            // Use TokenTextSplitter to split the text into chunks
+            // Parameters: defaultChunkSize, minChunkSizeChars, minChunkLengthToEmbed, maxNumChunks, keepSeparator
+            TokenTextSplitter splitter = new TokenTextSplitter(
+                chunkSize,           // defaultChunkSize
+                350,                  // minChunkSizeChars (default)
+                5,                    // minChunkLengthToEmbed (default)
+                10000,                // maxNumChunks (default)
+                true                  // keepSeparator (default)
+            );
+            
+            List<Document> chunks = splitter.apply(documents);
+            
+            logger.debug("Split document into {} chunks", chunks.size());
+            
+            return chunks.stream()
+                .map(Document::getText)
+                .filter(text -> !text.trim().isEmpty());
+                
+        } catch (Exception e) {
+            logger.error("Error processing file: " + e.getMessage(), e);
+            return Stream.empty();
+        }
+    }
+    
+    /**
+     * Extracts text from an input stream in chunks using Spring AI's TikaDocumentReader and TokenTextSplitter.
+     *
+     * @param inputStream The input stream to extract text from
+     * @param chunkSize The target size for each text chunk in tokens (default: 1000 if not specified)
+     * @return A stream of text chunks
+     */
+    public Stream<String> extractTextInChunks(InputStream inputStream, int chunkSize) {
+        Path tempFile = null;
+        try {
+            // Create a temporary file to store the input stream
+            tempFile = Files.createTempFile("textproc-", ".dat");
+            logger.debug("Created temporary file for processing: {}", tempFile);
+            
+            // Copy the input stream to a temporary file
+            Files.copy(inputStream, tempFile, StandardCopyOption.REPLACE_EXISTING);
+            
+            // Use the file-based extraction method
+            return extractTextInChunks(tempFile, chunkSize);
+        } catch (Exception e) {
+            logger.error("Error processing input stream: " + e.getMessage(), e);
+            return Stream.empty();
+        } finally {
+            // Clean up the temporary file
+            if (tempFile != null) {
+                try {
+                    Files.deleteIfExists(tempFile);
+                } catch (IOException e) {
+                    logger.warn("Failed to delete temporary file: {}", tempFile, e);
+                }
+            }
+        }
+    }
+    
+
+    
+    /**
+     * Extracts all text from a file using Spring AI's TikaDocumentReader.
+     *
+     * @param filePath The path to the file to extract text from
+     * @return The extracted text content
+     * @throws IOException If an I/O error occurs
      */
     public String extractTextFromFile(Path filePath) throws IOException {
         logger.info("Extracting text from file: {}", filePath);
-
-        AutoDetectParser parser = new AutoDetectParser();
-        BodyContentHandler handler = new BodyContentHandler(-1); // -1 for unlimited text
-        Metadata metadata = new Metadata(); // Can be used to inspect file metadata
-        ParseContext context = new ParseContext();
-
-        try (InputStream stream = Files.newInputStream(filePath)) {
-            parser.parse(stream, handler, metadata, context);
-            String extractedText = handler.toString();
-            logger.debug("Successfully extracted {} characters from {}", extractedText.length(), filePath);
-            // Example of accessing metadata:
-            // String contentType = metadata.get(Metadata.CONTENT_TYPE);
-            // logger.debug("Content type: {}", contentType);
-            return extractedText;
-        } catch (SAXException | TikaException e) {
-            logger.error("Tika parsing error for file {}: {}", filePath, e.getMessage());
-            return null; // Or rethrow as a custom application exception
+        DocumentReader reader = new TikaDocumentReader(filePath.toString());
+        List<Document> documents = reader.get();
+        
+        if (documents.isEmpty()) {
+            logger.warn("No content extracted from the document");
+            return "";
         }
-    }
-
-    /**
-     * Simpler Tika facade for text extraction.
-     *
-     * @param filePath The path to the file.
-     * @return The extracted text content.
-     * @throws IOException   If an I/O error occurs.
-     * @throws TikaException If a Tika parsing error occurs.
-     */
-    /**
-     * Extracts text using Tika's simple facade for quick text extraction.
-     * @param filePath The path to the file.
-     * @return The extracted text content.
-     * @throws IOException   If an I/O error occurs.
-     * @throws TikaException If a Tika parsing error occurs.
-     */
-    /**
-     * Extracts text using Tika's simple facade for quick text extraction.
-     *
-     * @param filePath The path to the file.
-     * @return The extracted text content.
-     * @throws IOException   If an I/O error occurs.
-     * @throws TikaException If a Tika parsing error occurs.
-     */
-    public String extractTextWithTikaFacade(Path filePath) throws IOException, TikaException {
-        logger.info("Extracting text (facade) from file: {}", filePath);
-        Tika tika = new Tika();
-        return tika.parseToString(filePath);
+        
+        // Combine all document pages into a single string
+        return documents.stream()
+            .map(Document::getText)
+            .reduce("", (a, b) -> a + "\n\n" + b);
     }
 }

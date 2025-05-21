@@ -3,102 +3,83 @@
 ![Java](https://img.shields.io/badge/Java-21-blue?logo=java)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.4.5-brightgreen?logo=springboot)
 ![Apache Tika](https://img.shields.io/badge/Apache_Tika-2.9.2-yellow?logo=apache)
-![Maven](https://img.shields.io/badge/Maven-Build-red?logo=apachemaven)
+![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3.12.0-orange?logo=rabbitmq)
 
----
-
-## 🚀 Project Overview
-
-**textProc** is a modern Spring Boot application that leverages Apache Tika and Spring AI for robust, profile-driven document processing. It supports standalone, Kubernetes, and Cloud Foundry modes, making it suitable for a variety of deployment scenarios.
-
----
+A Spring Boot application for document text extraction and processing with Apache Tika and Spring Cloud Stream.
 
 ## ✨ Features
 
-- ⚡ Fast and flexible directory-based text extraction
-- 🤖 Spring AI integration (configurable for future LLM/AI enhancements)
-- 📄 Apache Tika-powered document parsing
-- 🔄 Profile-based configuration (standalone, scdf)
-- 📂 Automatic directory management and error handling
-- 📝 Easy to extend and customize
+- 📄 Document text extraction using Apache Tika
+- 🔄 Spring Cloud Stream integration with RabbitMQ
+- 📂 Processes files from HDFS or local filesystem
+- 🚀 Profile-based configuration (standalone, scdf)
+- 📝 Chunked text processing for large documents
 
----
-
-## 📁 Directory Structure
-
-```text
-textProc/
-├── src/main/java/com/baskettecase/textProc/
-│   ├── TextProcApplication.java         # Main Spring Boot entry point
-│   ├── config/ProcessorProperties.java  # Configuration properties (profile-driven)
-│   ├── processor/StandaloneDirectoryProcessor.java # Standalone mode processor
-│   └── service/ExtractionService.java   # Tika-based extraction logic
-├── src/main/resources/
-│   ├── application.properties
-│   ├── application-standalone.properties
-│   └── application-scdf.properties
-├── data/                               # Input, output, error, and processed files (gitignored)
-├── pom.xml                             # Maven build file
-└── README.md
-```
-
----
-
-## 🛠️ Getting Started
-
-### Docker Build and Multi-Arch Images
-
-You can build, push, and pull multi-architecture Docker images using the included `dockerbuild.sh` script:
-
-```sh
-./dockerbuild.sh <dockerhub-username> <image-name> [tag]
-```
-
-- Builds the Spring Boot JAR
-- Builds and pushes a multi-arch (amd64/arm64) Docker image
-- Pulls the image after push to verify success
-
-### Troubleshooting
-
-If you see errors like `NoSuchMethodError` for `TarArchiveInputStream.getNextEntry()` from Tika, ensure you have `commons-compress` version 1.21+ (this project uses 1.26.1). See `pom.xml` for details.
-
-### SCDF (Spring Cloud Data Flow) Integration
-
-This project supports SCDF profile for event-driven processing via RabbitMQ. To use:
-- Set `app.processor.mode=scdf` in `application-scdf.properties`
-- Configure input/output channels if needed
-- Ensure MinIO/S3 environment variables are set for object storage
-
-See code and comments in `ScdfStreamProcessor.java` for details.
-
+## 🚀 Quick Start
 
 ### Prerequisites
 - Java 21+
 - Maven 3.8+
+- RabbitMQ (for SCDF mode)
+- HDFS (optional, for HDFS file processing)
 
-### Build and Run
+### Build
 ```sh
 mvn clean install
-mvn spring-boot:run
 ```
 
-### Directory Setup
-The application will automatically create required directories (input, output, error, processed) on startup.
+### Run in Standalone Mode
+```sh
+mvn spring-boot:run -Dspring-boot.run.profiles=standalone
+```
 
----
+### Run in SCDF Mode
+```sh
+mvn spring-boot:run -Dspring-boot.run.profiles=scdf
+```
 
 ## ⚙️ Configuration
 
-Configuration is profile-driven. Example for standalone mode:
-
+### Standalone Mode
 ```properties
-# src/main/resources/application-standalone.properties
+# application-standalone.properties
 app.processor.mode=standalone
 app.processor.standalone.input-directory=./data/input_files
 app.processor.standalone.output-directory=./data/output_text
 app.processor.standalone.error-directory=./data/error_files
 app.processor.standalone.processed-directory=./data/processed_files
 ```
+
+### SCDF Mode
+```properties
+# application-scdf.properties
+app.processor.mode=scdf
+spring.rabbitmq.host=localhost
+spring.rabbitmq.port=5672
+spring.rabbitmq.username=guest
+spring.rabbitmq.password=guest
+```
+
+## 📦 Docker
+
+Build and run with Docker:
+
+```sh
+# Build the application
+mvn clean package
+
+# Build Docker image
+docker build -t textproc .
+
+# Run with RabbitMQ
+docker run -p 8080:8080 --name textproc --network host textproc
+```
+
+## 📚 Documentation
+
+- [Spring Cloud Stream](https://spring.io/projects/spring-cloud-stream)
+- [Apache Tika](https://tika.apache.org/)
+- [RabbitMQ](https://www.rabbitmq.com/)
 
 Example for Spring Cloud Data Flow (SCDF) mode:
 
