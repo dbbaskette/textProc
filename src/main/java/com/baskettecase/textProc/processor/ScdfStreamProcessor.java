@@ -1,38 +1,37 @@
 package com.baskettecase.textProc.processor;
 
+import com.baskettecase.textProc.config.FileProcessingProperties;
 import com.baskettecase.textProc.model.FileProcessingInfo;
 import com.baskettecase.textProc.service.ExtractionService;
 import com.baskettecase.textProc.service.FileProcessingService;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.LocalDateTime;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Profile;
-import org.springframework.messaging.Message;
-import org.springframework.messaging.support.MessageBuilder;
-import org.springframework.stereotype.Component;
 import io.minio.MinioClient;
 import io.minio.GetObjectArgs;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Profile;
+import org.springframework.integration.support.MessageBuilder;
+import org.springframework.messaging.Message;
+import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.Map;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 
 /**
  * Spring Cloud Data Flow (SCDF) Stream Processor.
@@ -70,9 +69,24 @@ public class ScdfStreamProcessor {
     
     private final ExtractionService extractionService;
     private final FileProcessingService fileProcessingService;
+    @SuppressWarnings("unused")
+    private final FileProcessingProperties fileProcessingProperties;
     private MinioClient minioClient = null;
     private final Map<String, Boolean> processedFiles = new ConcurrentHashMap<>();
     
+    @Autowired
+    public ScdfStreamProcessor(ExtractionService extractionService, 
+                             FileProcessingService fileProcessingService, 
+                             FileProcessingProperties fileProcessingProperties) {
+        this.extractionService = extractionService;
+        this.fileProcessingService = fileProcessingService;
+        this.fileProcessingProperties = fileProcessingProperties;
+    }
+
+    public ScdfStreamProcessor(ExtractionService extractionService, FileProcessingService fileProcessingService) {
+        this(extractionService, fileProcessingService, new FileProcessingProperties());
+    }
+
     private String getFileKey(String url) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -90,23 +104,6 @@ public class ScdfStreamProcessor {
         }
     }
 
-
-    /**
-     * Constructs the SCDF Stream Processor.
-     *
-     * @param extractionService Service for text extraction from files (Apache Tika-based).
-     * @param fileProcessingService Service for tracking file processing information.
-     * @throws IllegalStateException if S3_ACCESS_KEY or S3_SECRET_KEY are missing in the environment.
-     */
-    public ScdfStreamProcessor(ExtractionService extractionService, FileProcessingService fileProcessingService) {
-        this.extractionService = extractionService;
-        this.fileProcessingService = fileProcessingService;
-    }
-
-    /**
-     * Spring Cloud Stream Function: receives S3 reference as input, outputs extracted text.
-     * Input message payload should be 'bucket/filename' (e.g., mybucket/myfile.pdf)
-     */
     private MinioClient getMinioClient() {
         if (minioClient == null) {
             String endpoint = System.getenv().getOrDefault("S3_ENDPOINT", "http://localhost:9000");
@@ -139,10 +136,6 @@ public class ScdfStreamProcessor {
         }
     }
     
-    /**
-     * Downloads a file from WebHDFS to a local temporary file and returns the path.
-     * The caller is responsible for cleaning up the temporary file.
-     */
     private Path downloadHdfsFile(String webhdfsUrl) throws IOException {
         logger.info("Downloading WebHDFS file: {}", webhdfsUrl);
 
@@ -172,7 +165,6 @@ public class ScdfStreamProcessor {
         }
     }
 
-    //private static final int CHUNK_SIZE = 1024 * 1024; // 1MB chunks
     private static final int CHUNK_SIZE = 1024 * 256; // 256KB chunks
     
     private Stream<String> processHdfsFileInChunks(String webhdfsUrl) throws IOException {
@@ -202,10 +194,6 @@ public class ScdfStreamProcessor {
         }
     }
     
-    /**
-     * Helper method to clean up temporary files.
-     * @param tempFile The temporary file to clean up
-     */
     private void cleanupTempFile(Path tempFile) {
         if (tempFile != null) {
             try {
@@ -225,28 +213,21 @@ public class ScdfStreamProcessor {
      * @return The processed file content as a single string
      * @throws IOException if an I/O error occurs
      */
+    @SuppressWarnings("unused")
     private String processHdfsFile(String webhdfsUrl) throws IOException {
         try (var chunks = processHdfsFileInChunks(webhdfsUrl)) {
             // Combine all chunks into a single string (use with caution for large files)
-            return chunks.collect(java.util.stream.Collectors.joining());
+            return chunks.collect(Collectors.joining());
         }
     }
 
+    @org.springframework.context.annotation.Bean
     @Profile("scdf")
-    @Bean
-    /**
-     * Spring Cloud Stream Function that processes files from either S3 or HDFS based on input message.
-     * 
-     * Expected JSON input formats:
-     * - S3: {"type":"S3", "bucket":"mybucket", "key":"path/to/file.pdf"}
-     * - HDFS: {"type":"HDFS", "url":"hdfs://namenode:8020/path/to/file.pdf"}
-     * 
-     * @return Function that processes messages and returns extracted text
-     */
-    public Function<Message<String>, Message<String>> textProc() {
+    public Function<Message<String>, Message<byte[]>> textProc() {
         return inputMsg -> {
             String payload = inputMsg.getPayload();
             logger.debug("Received message: {}", payload);
+            byte[] response;
             
             try {
                 JsonNode root = objectMapper.readTree(payload);
@@ -258,7 +239,10 @@ public class ScdfStreamProcessor {
                         // For S3, we'll keep the existing behavior for now
                         String extractedText = processS3File(root);
                         logger.info("Extraction complete ({} chars)", extractedText.length());
-                        return MessageBuilder.withPayload(extractedText).build();
+                        response = extractedText.getBytes(StandardCharsets.UTF_8);
+                        return MessageBuilder.withPayload(response)
+                                .copyHeaders(inputMsg.getHeaders())
+                                .build();
                         
                     case "HDFS":
                         webhdfsUrl = root.path("url").asText();
@@ -270,7 +254,9 @@ public class ScdfStreamProcessor {
                         String fileKey = getFileKey(webhdfsUrl);
                         if (processedFiles.containsKey(fileKey)) {
                             logger.info("Skipping already processed file: {}", webhdfsUrl);
-                            return MessageBuilder.withPayload("").build();
+                            return MessageBuilder.withPayload(new byte[0])
+                                    .copyHeaders(inputMsg.getHeaders())
+                                    .build();
                         }
                         
                         // Track file processing
@@ -296,7 +282,9 @@ public class ScdfStreamProcessor {
                         
                         if (chunks.isEmpty()) {
                             logger.warn("No chunks were generated for file: {}", webhdfsUrl);
-                            return MessageBuilder.withPayload("").build();
+                            return MessageBuilder.withPayload(new byte[0])
+                                    .copyHeaders(inputMsg.getHeaders())
+                                    .build();
                         }
                         
                         // Update file info with processing results
@@ -315,6 +303,7 @@ public class ScdfStreamProcessor {
                         // Return the first chunk immediately
                         String firstChunk = chunks.get(0);
                         logger.info("Returning first chunk of size: {} characters", firstChunk.length());
+                        response = firstChunk.getBytes(StandardCharsets.UTF_8);
                         
                         // Process remaining chunks asynchronously if there are any
                         if (chunks.size() > 1) {
@@ -324,7 +313,7 @@ public class ScdfStreamProcessor {
                                         String chunk = chunks.get(i);
                                         logger.info("Processing chunk {} of size: {} characters", i, chunk.length());
                                         // Here you would send each chunk to the output channel
-                                        // Example: outputChannel.send(MessageBuilder.withPayload(chunk).build());
+                                        // Example: outputChannel.send(MessageBuilder.withPayload(chunk.getBytes(StandardCharsets.UTF_8)).build());
                                     }
                                 } catch (Exception e) {
                                     logger.error("Error processing remaining chunks", e);
@@ -332,7 +321,9 @@ public class ScdfStreamProcessor {
                             });
                         }
                         
-                        return MessageBuilder.withPayload(firstChunk).build();
+                        return MessageBuilder.withPayload(response)
+                                .copyHeaders(inputMsg.getHeaders())
+                                .build();
                         
                     default:
                         throw new IllegalArgumentException("Unsupported file source type: " + type);
@@ -340,7 +331,10 @@ public class ScdfStreamProcessor {
                 
             } catch (Exception e) {
                 logger.error("Error processing message: {}", e.getMessage(), e);
-                return MessageBuilder.withPayload("").build();
+                String errorMessage = "Error: " + e.getMessage();
+                return MessageBuilder.withPayload(errorMessage.getBytes(StandardCharsets.UTF_8))
+                        .copyHeaders(inputMsg.getHeaders())
+                        .build();
             }
         };
     }

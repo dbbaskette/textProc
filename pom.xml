@@ -13,7 +13,7 @@
 
     <groupId>com.baskettecase</groupId>
     <artifactId>textProc</artifactId>
-    <version>0.0.2-SNAPSHOT</version>
+    <version>0.0.3-SNAPSHOT</version>
     <name>textProc</name>
     <description>Text processor using Apache Tika with Spring Boot and Spring AI</description>
     
@@ -122,6 +122,13 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+        
+        <!-- Configuration Processor for IDE support of @ConfigurationProperties -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
             <optional>true</optional>
         </dependency>
         <dependency>
