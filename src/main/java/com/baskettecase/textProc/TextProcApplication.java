@@ -5,6 +5,7 @@ import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.web.servlet.support.SpringBootServletInitializer;
 
 /**
  * Main entry point for the textProc Spring Boot application.
@@ -12,7 +13,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
  */
 @SpringBootApplication
 @EnableConfigurationProperties(ProcessorProperties.class) // Explicitly enable your custom properties
-public class TextProcApplication {
+public class TextProcApplication extends SpringBootServletInitializer {
 
     /**
      * Main method to launch the Spring Boot application.
@@ -20,7 +21,12 @@ public class TextProcApplication {
      */
     public static void main(String[] args) {
         new SpringApplicationBuilder(TextProcApplication.class)
+            .web(WebApplicationType.SERVLET)
             .run(args);
     }
 
+    @Override
+    protected SpringApplicationBuilder configure(SpringApplicationBuilder application) {
+        return application.sources(TextProcApplication.class);
+    }
 }
