@@ -1,6 +1,11 @@
 package com.baskettecase.textProc.processor;
 
+import com.baskettecase.textProc.model.FileProcessingInfo;
 import com.baskettecase.textProc.service.ExtractionService;
+import com.baskettecase.textProc.service.FileProcessingService;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -64,6 +69,7 @@ public class ScdfStreamProcessor {
     private static final ObjectMapper objectMapper = new ObjectMapper();
     
     private final ExtractionService extractionService;
+    private final FileProcessingService fileProcessingService;
     private MinioClient minioClient = null;
     private final Map<String, Boolean> processedFiles = new ConcurrentHashMap<>();
     
@@ -89,10 +95,12 @@ public class ScdfStreamProcessor {
      * Constructs the SCDF Stream Processor.
      *
      * @param extractionService Service for text extraction from files (Apache Tika-based).
+     * @param fileProcessingService Service for tracking file processing information.
      * @throws IllegalStateException if S3_ACCESS_KEY or S3_SECRET_KEY are missing in the environment.
      */
-    public ScdfStreamProcessor(ExtractionService extractionService) {
+    public ScdfStreamProcessor(ExtractionService extractionService, FileProcessingService fileProcessingService) {
         this.extractionService = extractionService;
+        this.fileProcessingService = fileProcessingService;
     }
 
     /**
@@ -209,9 +217,16 @@ public class ScdfStreamProcessor {
         }
     }
     
-    // Kept for backward compatibility
+    /**
+     * Processes an HDFS file by downloading and processing it in chunks.
+     * Kept for backward compatibility.
+     *
+     * @param webhdfsUrl The URL of the HDFS file to process
+     * @return The processed file content as a single string
+     * @throws IOException if an I/O error occurs
+     */
     private String processHdfsFile(String webhdfsUrl) throws IOException {
-        try (Stream<String> chunks = processHdfsFileInChunks(webhdfsUrl)) {
+        try (var chunks = processHdfsFileInChunks(webhdfsUrl)) {
             // Combine all chunks into a single string (use with caution for large files)
             return chunks.collect(java.util.stream.Collectors.joining());
         }
@@ -257,6 +272,22 @@ public class ScdfStreamProcessor {
                             logger.info("Skipping already processed file: {}", webhdfsUrl);
                             return MessageBuilder.withPayload("").build();
                         }
+                        
+                        // Track file processing
+                        FileProcessingInfo fileInfo = new FileProcessingInfo();
+                        fileInfo.setFilename(fileKey);
+                        fileInfo.setProcessedAt(LocalDateTime.now());
+                        fileInfo.setStatus("PROCESSING");
+                        fileInfo.setChunkSize(CHUNK_SIZE);
+                        fileInfo.setInputStream(root.path("inputStream").asText("default-input"));
+                        fileInfo.setOutputStream(root.path("outputStream").asText("default-output"));
+                        
+                        // Set stream names in the service
+                        fileProcessingService.setStreamNames(
+                            fileInfo.getInputStream(),
+                            fileInfo.getOutputStream()
+                        );
+                        
                         processedFiles.put(fileKey, true);
                         logger.info("Processing new file: {}", webhdfsUrl);
                         
@@ -267,6 +298,13 @@ public class ScdfStreamProcessor {
                             logger.warn("No chunks were generated for file: {}", webhdfsUrl);
                             return MessageBuilder.withPayload("").build();
                         }
+                        
+                        // Update file info with processing results
+                        fileInfo.setFileSize(Files.size(Path.of(webhdfsUrl)));
+                        fileInfo.setChunkCount(chunks.size());
+                        fileInfo.setStatus("COMPLETED");
+                        fileInfo.setFileType(Files.probeContentType(Path.of(webhdfsUrl)));
+                        fileProcessingService.addProcessedFile(fileInfo);
                         
                         // Log chunk information
                         logger.info("Processed {} chunks for file: {}", chunks.size(), webhdfsUrl);

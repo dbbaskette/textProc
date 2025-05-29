@@ -20,7 +20,6 @@ public class TextProcApplication {
      */
     public static void main(String[] args) {
         new SpringApplicationBuilder(TextProcApplication.class)
-            .web(WebApplicationType.NONE) // Disable web environment
             .run(args);
     }
 

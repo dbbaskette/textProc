@@ -1,0 +1,19 @@
+applications:
+- name: text-proc
+  instances: 1
+  memory: 1G
+  path: target/textProc-0.0.2-SNAPSHOT.jar
+  routes:
+    - route: text-proc-${random-word}.apps.internal
+  env:
+    SPRING_PROFILES_ACTIVE: cloud
+    JBP_CONFIG_SPRING_AUTO_RECONFIGURATION: '{enabled: true}'
+    JBP_CONFIG_OPEN_JDK_JRE: '{ jre: { version: 21.+ } }'
+    JBP_JAVA_TOOL_OPTIONS: '-XX:ReservedCodeCacheSize=32M -XX:MaxMetaspaceSize=120M -Xss512k -Xms256m -Xmx768m -Djava.security.egd=file:///dev/urandom -Dfile.encoding=UTF-8'
+    SPRING_APPLICATION_JSON: |
+      {
+        "server.port": 8080,
+        "management.endpoints.web.exposure.include": "health,info,metrics",
+        "management.endpoint.health.show-details": "always",
+        "management.endpoint.metrics.access": "unrestricted"
+      }
