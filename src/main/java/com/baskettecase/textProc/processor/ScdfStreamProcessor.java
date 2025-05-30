@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -145,8 +146,21 @@ public class ScdfStreamProcessor {
             url += (url.contains("?") ? "&" : "?") + "op=OPEN";
         }
 
-        // Create a temporary file with a meaningful prefix/suffix
-        Path tempFile = Files.createTempFile("hdfs-download-", ".dat");
+        // Extract the filename from the URL
+        String filename = webhdfsUrl.substring(webhdfsUrl.lastIndexOf('/') + 1);
+        
+        // Decode URL-encoded characters in the filename
+        try {
+            filename = java.net.URLDecoder.decode(filename, StandardCharsets.UTF_8.name());
+        } catch (UnsupportedEncodingException e) {
+            logger.warn("Failed to decode filename: " + filename, e);
+            // Continue with the original filename if decoding fails
+        }
+        
+        // Create a temporary file with the original filename in a temp directory
+        Path tempDir = Files.createTempDirectory("hdfs-downloads");
+        Path tempFile = tempDir.resolve(filename);
+        
         logger.debug("Created temporary file: {}", tempFile);
 
         try (InputStream in = java.net.URI.create(url).toURL().openStream()) {
@@ -155,11 +169,12 @@ public class ScdfStreamProcessor {
             logger.info("Downloaded {} bytes to {}", bytesCopied, tempFile);
             return tempFile;
         } catch (IOException e) {
-            // Clean up the temp file if there was an error
+            // Clean up the temp file and directory if there was an error
             try {
                 Files.deleteIfExists(tempFile);
+                Files.deleteIfExists(tempDir);
             } catch (IOException deleteEx) {
-                logger.warn("Failed to delete temporary file after download error", deleteEx);
+                logger.warn("Failed to clean up temporary files after download error", deleteEx);
             }
             throw new IOException("Failed to download file from " + url, e);
         }
@@ -197,10 +212,23 @@ public class ScdfStreamProcessor {
     private void cleanupTempFile(Path tempFile) {
         if (tempFile != null) {
             try {
+                // Delete the file
                 Files.deleteIfExists(tempFile);
                 logger.debug("Deleted temporary file: {}", tempFile);
+                
+                // Try to delete the parent directory if it's empty
+                Path parentDir = tempFile.getParent();
+                if (parentDir != null && parentDir.getFileName().toString().startsWith("hdfs-downloads")) {
+                    try {
+                        Files.deleteIfExists(parentDir);
+                        logger.debug("Deleted temporary directory: {}", parentDir);
+                    } catch (IOException e) {
+                        // Ignore if directory is not empty
+                        logger.trace("Could not delete directory (may not be empty): {}", parentDir);
+                    }
+                }
             } catch (IOException e) {
-                logger.warn("Failed to delete temporary file: " + tempFile, e);
+                logger.warn("Failed to delete temporary file: {}", tempFile, e);
             }
         }
     }
