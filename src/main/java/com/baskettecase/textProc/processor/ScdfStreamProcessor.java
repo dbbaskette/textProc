@@ -227,7 +227,6 @@ public class ScdfStreamProcessor {
         return inputMsg -> {
             String payload = inputMsg.getPayload();
             logger.debug("Received message: {}", payload);
-            byte[] response;
             
             try {
                 JsonNode root = objectMapper.readTree(payload);
@@ -239,8 +238,7 @@ public class ScdfStreamProcessor {
                         // For S3, we'll keep the existing behavior for now
                         String extractedText = processS3File(root);
                         logger.info("Extraction complete ({} chars)", extractedText.length());
-                        response = extractedText.getBytes(StandardCharsets.UTF_8);
-                        return MessageBuilder.withPayload(response)
+                        return MessageBuilder.withPayload(extractedText.getBytes(StandardCharsets.UTF_8))
                                 .copyHeaders(inputMsg.getHeaders())
                                 .build();
                         
@@ -277,53 +275,60 @@ public class ScdfStreamProcessor {
                         processedFiles.put(fileKey, true);
                         logger.info("Processing new file: {}", webhdfsUrl);
                         
-                        // Process in chunks and send each chunk as a separate message
-                        List<String> chunks = processHdfsFileInChunks(webhdfsUrl).collect(Collectors.toList());
-                        
-                        if (chunks.isEmpty()) {
-                            logger.warn("No chunks were generated for file: {}", webhdfsUrl);
-                            return MessageBuilder.withPayload(new byte[0])
+                        // Download the file once and process it
+                        Path tempFile = downloadHdfsFile(webhdfsUrl);
+                        try {
+                            // Process the downloaded file in chunks
+                            List<String> chunks = extractionService.extractTextInChunks(tempFile, CHUNK_SIZE)
+                                .collect(Collectors.toList());
+                            
+                            if (chunks.isEmpty()) {
+                                logger.warn("No chunks were generated for file: {}", webhdfsUrl);
+                                return MessageBuilder.withPayload(new byte[0])
+                                        .copyHeaders(inputMsg.getHeaders())
+                                        .build();
+                            }
+                            
+                            // Update file info with processing results using the temporary file
+                            fileInfo.setFileSize(Files.size(tempFile));
+                            fileInfo.setChunkCount(chunks.size());
+                            fileInfo.setStatus("COMPLETED");
+                            fileInfo.setFileType(Files.probeContentType(tempFile));
+                            fileProcessingService.addProcessedFile(fileInfo);
+                            
+                            // Log chunk information
+                            logger.info("Processed {} chunks for file: {}", chunks.size(), webhdfsUrl);
+                            for (int i = 0; i < chunks.size(); i++) {
+                                logger.debug("Chunk {} size: {} characters", i, chunks.get(i).length());
+                            }
+                            
+                            // Process remaining chunks asynchronously if there are any
+                            if (chunks.size() > 1) {
+                                CompletableFuture.runAsync(() -> {
+                                    try {
+                                        for (int i = 1; i < chunks.size(); i++) {
+                                            String chunk = chunks.get(i);
+                                            logger.info("Processing chunk {} of size: {} characters", i, chunk.length());
+                                            // Here you would send each chunk to the output channel
+                                            // Example: outputChannel.send(MessageBuilder.withPayload(chunk.getBytes(StandardCharsets.UTF_8)).build());
+                                        }
+                                    } catch (Exception e) {
+                                        logger.error("Error processing remaining chunks", e);
+                                    }
+                                });
+                            }
+                            
+                            // Return the first chunk immediately
+                            String firstChunk = chunks.get(0);
+                            logger.info("Returning first chunk of size: {} characters", firstChunk.length());
+                            return MessageBuilder.withPayload(firstChunk.getBytes(StandardCharsets.UTF_8))
                                     .copyHeaders(inputMsg.getHeaders())
                                     .build();
+                            
+                        } finally {
+                            // Clean up the temporary file after we're done with it
+                            cleanupTempFile(tempFile);
                         }
-                        
-                        // Update file info with processing results
-                        fileInfo.setFileSize(Files.size(Path.of(webhdfsUrl)));
-                        fileInfo.setChunkCount(chunks.size());
-                        fileInfo.setStatus("COMPLETED");
-                        fileInfo.setFileType(Files.probeContentType(Path.of(webhdfsUrl)));
-                        fileProcessingService.addProcessedFile(fileInfo);
-                        
-                        // Log chunk information
-                        logger.info("Processed {} chunks for file: {}", chunks.size(), webhdfsUrl);
-                        for (int i = 0; i < chunks.size(); i++) {
-                            logger.debug("Chunk {} size: {} characters", i, chunks.get(i).length());
-                        }
-                        
-                        // Return the first chunk immediately
-                        String firstChunk = chunks.get(0);
-                        logger.info("Returning first chunk of size: {} characters", firstChunk.length());
-                        response = firstChunk.getBytes(StandardCharsets.UTF_8);
-                        
-                        // Process remaining chunks asynchronously if there are any
-                        if (chunks.size() > 1) {
-                            CompletableFuture.runAsync(() -> {
-                                try {
-                                    for (int i = 1; i < chunks.size(); i++) {
-                                        String chunk = chunks.get(i);
-                                        logger.info("Processing chunk {} of size: {} characters", i, chunk.length());
-                                        // Here you would send each chunk to the output channel
-                                        // Example: outputChannel.send(MessageBuilder.withPayload(chunk.getBytes(StandardCharsets.UTF_8)).build());
-                                    }
-                                } catch (Exception e) {
-                                    logger.error("Error processing remaining chunks", e);
-                                }
-                            });
-                        }
-                        
-                        return MessageBuilder.withPayload(response)
-                                .copyHeaders(inputMsg.getHeaders())
-                                .build();
                         
                     default:
                         throw new IllegalArgumentException("Unsupported file source type: " + type);
