@@ -13,6 +13,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -64,23 +65,37 @@ public class ExtractionService {
             
             logger.debug("Successfully extracted document with {} pages", documents.size());
             
-            // Use TokenTextSplitter to split the text into chunks
-            // Parameters: defaultChunkSize, minChunkSizeChars, minChunkLengthToEmbed, maxNumChunks, keepSeparator
+            // Process each page as a separate document
+            List<Document> allChunks = new ArrayList<>();
+            
+            // Configure the splitter with more appropriate settings for PDF content
+            // Using a smaller chunk size and more aggressive splitting for better handling of PDF content
             TokenTextSplitter splitter = new TokenTextSplitter(
-                chunkSize,           // defaultChunkSize
-                350,                  // minChunkSizeChars (default)
-                5,                    // minChunkLengthToEmbed (default)
-                10000,                // maxNumChunks (default)
-                true                  // keepSeparator (default)
+                chunkSize / 2,        // Smaller chunk size for PDFs
+                100,                   // Smaller min chunk size to avoid losing content
+                20,                    // Higher min length to embed to avoid very small chunks
+                1000,                  // Lower max chunks to prevent memory issues
+                true                   // Keep separator to maintain context
             );
             
-            List<Document> chunks = splitter.apply(documents);
+            // Process each page separately to maintain page boundaries
+            for (Document doc : documents) {
+                String pageText = doc.getText();
+                if (pageText != null && !pageText.trim().isEmpty()) {
+                    // Split each page's content into chunks
+                    List<Document> pageChunks = splitter.apply(List.of(doc));
+                    allChunks.addAll(pageChunks);
+                    
+                    logger.trace("Page split into {} chunks", pageChunks.size());
+                }
+            }
             
-            logger.debug("Split document into {} chunks", chunks.size());
+            logger.debug("Document split into {} total chunks across all pages", allChunks.size());
             
-            return chunks.stream()
+            // Return the text content of all chunks
+            return allChunks.stream()
                 .map(Document::getText)
-                .filter(text -> !text.trim().isEmpty());
+                .filter(text -> text != null && !text.trim().isEmpty());
                 
         } catch (Exception e) {
             logger.error("Error processing file: " + e.getMessage(), e);

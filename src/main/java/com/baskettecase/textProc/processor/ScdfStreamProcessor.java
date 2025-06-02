@@ -4,16 +4,23 @@ import com.baskettecase.textProc.config.FileProcessingProperties;
 import com.baskettecase.textProc.model.FileProcessingInfo;
 import com.baskettecase.textProc.service.ExtractionService;
 import com.baskettecase.textProc.service.FileProcessingService;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import io.minio.MinioClient;
 import io.minio.GetObjectArgs;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
-import org.springframework.integration.support.MessageBuilder;
 import org.springframework.messaging.Message;
+import org.springframework.messaging.MessageHeaders;
+import org.springframework.messaging.support.MessageBuilder;
+import org.springframework.cloud.stream.function.StreamBridge;
+import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -74,18 +81,21 @@ public class ScdfStreamProcessor {
     private final FileProcessingProperties fileProcessingProperties;
     private MinioClient minioClient = null;
     private final Map<String, Boolean> processedFiles = new ConcurrentHashMap<>();
+    private final StreamBridge streamBridge;
     
     @Autowired
     public ScdfStreamProcessor(ExtractionService extractionService, 
                              FileProcessingService fileProcessingService, 
-                             FileProcessingProperties fileProcessingProperties) {
+                             FileProcessingProperties fileProcessingProperties,
+                             StreamBridge streamBridge) {
         this.extractionService = extractionService;
         this.fileProcessingService = fileProcessingService;
         this.fileProcessingProperties = fileProcessingProperties;
+        this.streamBridge = streamBridge;
     }
 
     public ScdfStreamProcessor(ExtractionService extractionService, FileProcessingService fileProcessingService) {
-        this(extractionService, fileProcessingService, new FileProcessingProperties());
+        this(extractionService, fileProcessingService, new FileProcessingProperties(), null);
     }
 
     private String getFileKey(String url) {
@@ -249,17 +259,17 @@ public class ScdfStreamProcessor {
         }
     }
 
-    @org.springframework.context.annotation.Bean
-    @Profile("scdf")
+    @Bean
     public Function<Message<String>, Message<byte[]>> textProc() {
         return inputMsg -> {
             String payload = inputMsg.getPayload();
-            logger.debug("Received message: {}", payload);
-            
-            try {
-                JsonNode root = objectMapper.readTree(payload);
-                String type = root.path("type").asText("");
-                String webhdfsUrl;
+            MessageHeaders headers = inputMsg.getHeaders();
+        logger.debug("Received message: {}", payload);
+        
+        try {
+            JsonNode root = objectMapper.readTree(payload);
+            String type = root.path("type").asText("");
+            String webhdfsUrl;
 
                 switch (type.toUpperCase()) {
                     case "S3":
@@ -330,27 +340,39 @@ public class ScdfStreamProcessor {
                                 logger.debug("Chunk {} size: {} characters", i, chunks.get(i).length());
                             }
                             
-                            // Process remaining chunks asynchronously if there are any
-                            if (chunks.size() > 1) {
-                                CompletableFuture.runAsync(() -> {
-                                    try {
-                                        for (int i = 1; i < chunks.size(); i++) {
-                                            String chunk = chunks.get(i);
-                                            logger.info("Processing chunk {} of size: {} characters", i, chunk.length());
-                                            // Here you would send each chunk to the output channel
-                                            // Example: outputChannel.send(MessageBuilder.withPayload(chunk.getBytes(StandardCharsets.UTF_8)).build());
+                            // Process all chunks asynchronously
+                            CompletableFuture.runAsync(() -> {
+                                try {
+                                    for (int i = 0; i < chunks.size(); i++) {
+                                        String chunk = chunks.get(i);
+                                        logger.info("Sending chunk {} of size: {} characters to output channel", i, chunk.length());
+                                        
+                                        // Send chunk using StreamBridge
+                                        boolean sent = streamBridge.send("output-out-0", 
+                                            MessageBuilder.withPayload(chunk.getBytes(StandardCharsets.UTF_8))
+                                                .copyHeaders(headers)
+                                                .setHeader("chunkIndex", i)
+                                                .setHeader("totalChunks", chunks.size())
+                                                .build());
+                                                
+                                        if (!sent) {
+                                            logger.error("Failed to send chunk {} to output channel", i);
+                                        } else {
+                                            logger.debug("Successfully sent chunk {} to output channel", i);
                                         }
-                                    } catch (Exception e) {
-                                        logger.error("Error processing remaining chunks", e);
                                     }
-                                });
-                            }
+                                } catch (Exception e) {
+                                    logger.error("Error processing chunks", e);
+                                }
+                            });
                             
                             // Return the first chunk immediately
                             String firstChunk = chunks.get(0);
                             logger.info("Returning first chunk of size: {} characters", firstChunk.length());
                             return MessageBuilder.withPayload(firstChunk.getBytes(StandardCharsets.UTF_8))
-                                    .copyHeaders(inputMsg.getHeaders())
+                                    .copyHeaders(headers)
+                                    .setHeader("chunkIndex", 0)
+                                    .setHeader("totalChunks", chunks.size())
                                     .build();
                             
                         } finally {
@@ -363,11 +385,8 @@ public class ScdfStreamProcessor {
                 }
                 
             } catch (Exception e) {
-                logger.error("Error processing message: {}", e.getMessage(), e);
-                String errorMessage = "Error: " + e.getMessage();
-                return MessageBuilder.withPayload(errorMessage.getBytes(StandardCharsets.UTF_8))
-                        .copyHeaders(inputMsg.getHeaders())
-                        .build();
+                logger.error("Error processing message", e);
+                throw new RuntimeException("Error processing message", e);
             }
         };
     }
