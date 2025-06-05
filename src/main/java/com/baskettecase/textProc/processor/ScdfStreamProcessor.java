@@ -286,6 +286,13 @@ public class ScdfStreamProcessor {
                             throw new IllegalArgumentException("Missing or empty 'url' field for HDFS type");
                         }
                         
+                        // Extract the filename from the URL
+                        String filename = webhdfsUrl.substring(webhdfsUrl.lastIndexOf('/') + 1);
+                        try {
+                            filename = java.net.URLDecoder.decode(filename, StandardCharsets.UTF_8.name());
+                        } catch (UnsupportedEncodingException e) {
+                            logger.warn("Failed to decode filename: " + filename, e);
+                        }
                         // Check if we've already processed this file
                         String fileKey = getFileKey(webhdfsUrl);
                         if (processedFiles.containsKey(fileKey)) {
@@ -297,7 +304,7 @@ public class ScdfStreamProcessor {
                         
                         // Track file processing
                         FileProcessingInfo fileInfo = new FileProcessingInfo();
-                        fileInfo.setFilename(fileKey);
+                        fileInfo.setFilename(filename);
                         fileInfo.setProcessedAt(LocalDateTime.now());
                         fileInfo.setStatus("PROCESSING");
                         fileInfo.setChunkSize(CHUNK_SIZE);
