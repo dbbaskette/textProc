@@ -2,14 +2,14 @@ applications:
 - name: textProc
   instances: 1
   memory: 1G
-  path: target/textProc-0.0.3-SNAPSHOT.jar
+  path: target/textProc-0.0.8.jar
   buildpacks:
     - java_buildpack_offline
   
   # Ensure web process is enabled
   processes:
   - type: web
-    command: java -jar target/textProc-0.0.6-SNAPSHOT.jar
+    command: java -jar target/textProc-0.0.8.jar
     health-check-type: http
     health-check-http-endpoint: /actuator/health
     timeout: 300

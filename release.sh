@@ -80,19 +80,27 @@ git push origin "v$new_version"
 
 echo "Release tagged as v$new_version and pushed."
 
-# 7. Optionally build and deploy to Cloud Foundry
+# 7. Optionally create a GitHub release and upload the JAR
 
-echo -n "Would you like to build the new JAR and push to Cloud Foundry? [y/N]: "
-read deploy_answer
-if [[ "$deploy_answer" =~ ^[Yy]$ ]]; then
+echo -n "Would you like to create a new GitHub release and upload the JAR? [y/N]: "
+read gh_release_answer
+if [[ "$gh_release_answer" =~ ^[Yy]$ ]]; then
   echo "Building JAR with mvn clean package..."
   mvn clean package
-  echo "Updating manifest.yml with new JAR path: target/${main_artifact_id}-$new_version.jar"
-  sed -i.bak "s|path: .*|path: target/${main_artifact_id}-$new_version.jar|" manifest.yml && rm manifest.yml.bak
-  echo "Pushing to Cloud Foundry..."
-  cf push
+  JAR_PATH="target/${main_artifact_id}-$new_version.jar"
+  if [[ ! -f "$JAR_PATH" ]]; then
+    echo "JAR file $JAR_PATH not found! Aborting release upload."
+    exit 1
+  fi
+  echo "Creating GitHub release v$new_version and uploading $JAR_PATH..."
+  # Create release if not exists, else update assets
+  if ! gh release view "v$new_version" >/dev/null 2>&1; then
+    gh release create "v$new_version" "$JAR_PATH" --title "v$new_version" --notes "Release $new_version"
+  else
+    gh release upload "v$new_version" "$JAR_PATH" --clobber
+  fi
+  echo "GitHub release v$new_version created/updated with JAR."
 else
-  echo "Skipping build and Cloud Foundry deployment."
+  echo "Skipping GitHub release creation."
 fi
-
 echo "Release process complete."
