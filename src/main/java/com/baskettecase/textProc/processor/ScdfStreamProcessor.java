@@ -149,31 +149,42 @@ public class ScdfStreamProcessor {
     
     private Path downloadHdfsFile(String webhdfsUrl) throws IOException {
         logger.info("Downloading WebHDFS file: {}", webhdfsUrl);
-
+    
         // Ensure the URL has the op=OPEN parameter
         String url = webhdfsUrl;
         if (!url.contains("op=OPEN")) {
             url += (url.contains("?") ? "&" : "?") + "op=OPEN";
         }
-
-        // Extract the filename from the URL
-        String filename = webhdfsUrl.substring(webhdfsUrl.lastIndexOf('/') + 1);
-        
-        // Decode URL-encoded characters in the filename
+    
+        // Defensive: ensure the filename portion is encoded only once
+        int lastSlash = url.lastIndexOf('/');
+        int queryIdx = url.indexOf('?', lastSlash);
+        String filename = (queryIdx != -1) ? url.substring(lastSlash + 1, queryIdx) : url.substring(lastSlash + 1);
+        String encodedFilename;
+        if (filename.contains("%")) {
+            // Already encoded, use as-is
+            encodedFilename = filename;
+        } else {
+            // Not encoded, encode it
+            encodedFilename = java.net.URLEncoder.encode(filename, StandardCharsets.UTF_8.name());
+        }
+        String rebuiltUrl = url.substring(0, lastSlash + 1) + encodedFilename + (queryIdx != -1 ? url.substring(queryIdx) : "");
+    
+        // Decode URL-encoded characters in the filename for local storage
         try {
             filename = java.net.URLDecoder.decode(filename, StandardCharsets.UTF_8.name());
         } catch (UnsupportedEncodingException e) {
             logger.warn("Failed to decode filename: " + filename, e);
             // Continue with the original filename if decoding fails
         }
-        
+    
         // Create a temporary file with the original filename in a temp directory
         Path tempDir = Files.createTempDirectory("hdfs-downloads");
         Path tempFile = tempDir.resolve(filename);
-        
+    
         logger.debug("Created temporary file: {}", tempFile);
-
-        try (InputStream in = java.net.URI.create(url).toURL().openStream()) {
+    
+        try (InputStream in = java.net.URI.create(rebuiltUrl).toURL().openStream()) {
             // Copy with progress logging
             long bytesCopied = Files.copy(in, tempFile, StandardCopyOption.REPLACE_EXISTING);
             logger.info("Downloaded {} bytes to {}", bytesCopied, tempFile);
@@ -186,7 +197,7 @@ public class ScdfStreamProcessor {
             } catch (IOException deleteEx) {
                 logger.warn("Failed to clean up temporary files after download error", deleteEx);
             }
-            throw new IOException("Failed to download file from " + url, e);
+            throw new IOException("Failed to download file from " + rebuiltUrl, e);
         }
     }
 
