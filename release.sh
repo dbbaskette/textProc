@@ -1,15 +1,53 @@
 #!/bin/bash
 
-set -e
+# ==============================================================================
+# Generic Maven Project Release Script
+# ==============================================================================
+# 
+# This script automates the complete release process for any Maven project:
+# 1. Updates version numbers in both VERSION file and pom.xml
+# 2. Builds the JAR file using Maven
+# 3. Commits and pushes changes to git
+# 4. Creates and pushes git tags
+# 5. Creates GitHub releases with JAR attachments
+# 
+# Prerequisites:
+# - Git repository with remote origin
+# - GitHub CLI (gh) installed and authenticated
+# - Maven or Maven wrapper (./mvnw) available
+# - pom.xml file in current directory
+# 
+# Usage:
+#   ./generic-release.sh
+# 
+# The script will interactively guide you through the release process.
+# Works with any Maven project by automatically detecting project details.
+# 
+# ==============================================================================
 
-# Colors for output (only if terminal supports it)
+set -e  # Exit on any error
+
+# ==============================================================================
+# CONFIGURATION
+# ==============================================================================
+
+# Script configuration - can be overridden by environment variables
+VERSION_FILE="${VERSION_FILE:-VERSION}"
+SKIP_TESTS="${SKIP_TESTS:-true}"
+DEFAULT_STARTING_VERSION="${DEFAULT_STARTING_VERSION:-1.0.0}"
+
+# ==============================================================================
+# TERMINAL COLORS SETUP
+# ==============================================================================
+# Set up colored output for better readability (only if terminal supports it)
 if [[ -t 1 ]] && command -v tput &> /dev/null && tput colors &> /dev/null && [[ $(tput colors) -ge 8 ]]; then
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    BLUE='\033[0;34m'
-    NC='\033[0m' # No Color
+    RED='\033[0;31m'      # Red for errors
+    GREEN='\033[0;32m'    # Green for success messages
+    YELLOW='\033[1;33m'   # Yellow for warnings
+    BLUE='\033[0;34m'     # Blue for info messages
+    NC='\033[0m'          # No Color (reset)
 else
+    # No color support - use empty strings
     RED=''
     GREEN=''
     YELLOW=''
@@ -17,7 +55,11 @@ else
     NC=''
 fi
 
-# Helper functions - all output to stderr so they don't interfere with return values
+# ==============================================================================
+# UTILITY FUNCTIONS
+# ==============================================================================
+
+# Logging functions - all output to stderr so they don't interfere with return values
 print_info() {
     echo -e "${BLUE}[INFO]${NC} $1" >&2
 }
@@ -34,7 +76,47 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
-# Function to validate version format (semantic versioning)
+# ==============================================================================
+# PROJECT DETECTION FUNCTIONS
+# ==============================================================================
+
+# Extract project information from pom.xml
+get_project_info() {
+    if [[ ! -f "pom.xml" ]]; then
+        print_error "pom.xml not found in current directory"
+        return 1
+    fi
+    
+    # Extract artifactId from pom.xml
+    local artifact_id=$(grep -m 1 "<artifactId>" pom.xml | sed 's/.*<artifactId>\(.*\)<\/artifactId>.*/\1/' | tr -d ' ')
+    
+    if [[ -z "$artifact_id" ]]; then
+        print_error "Could not extract artifactId from pom.xml"
+        return 1
+    fi
+    
+    echo "$artifact_id"
+}
+
+# Get the current version from pom.xml as fallback
+get_pom_version() {
+    if [[ ! -f "pom.xml" ]]; then
+        return 1
+    fi
+    
+    # Extract version from pom.xml (look for version tag not in parent)
+    local version=$(grep -m 1 "^\s*<version>" pom.xml | sed 's/.*<version>\(.*\)<\/version>.*/\1/' | tr -d ' ')
+    
+    if [[ -n "$version" ]]; then
+        echo "$version"
+    fi
+}
+
+# ==============================================================================
+# VERSION MANAGEMENT FUNCTIONS
+# ==============================================================================
+
+# Validates version format according to semantic versioning (MAJOR.MINOR.PATCH)
 validate_version() {
     local version="$1"
     if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -44,22 +126,26 @@ validate_version() {
     return 0
 }
 
-# Function to increment version
+# Increments version number according to semantic versioning rules
+# Args: version (e.g., "1.2.3"), part ("major"|"minor"|"patch")
+# Returns: new version string
 increment_version() {
     local version="$1"
     local part="$2"
     
+    # Split version into components
     IFS='.' read -r major minor patch <<< "$version"
     
+    # Increment according to semantic versioning rules
     case "$part" in
         "major")
             major=$((major + 1))
-            minor=0
+            minor=0      # Reset minor and patch on major increment
             patch=0
             ;;
         "minor")
             minor=$((minor + 1))
-            patch=0
+            patch=0      # Reset patch on minor increment
             ;;
         "patch")
             patch=$((patch + 1))
@@ -73,18 +159,31 @@ increment_version() {
     echo "$major.$minor.$patch"
 }
 
-# Check if required tools are available
+# ==============================================================================
+# SYSTEM REQUIREMENTS CHECK
+# ==============================================================================
+
+# Verifies that all required tools are available before proceeding
 check_requirements() {
     local missing_tools=()
     
+    # Check for Git (required for version control operations)
     if ! command -v git &> /dev/null; then
         missing_tools+=("git")
     fi
     
+    # Check for GitHub CLI (required for creating releases)
     if ! command -v gh &> /dev/null; then
         missing_tools+=("gh (GitHub CLI)")
     fi
     
+    # Check for Maven (prefer wrapper, fallback to system maven)
+    # Required for building JAR files
+    if [[ ! -f "./mvnw" ]] && ! command -v mvn &> /dev/null; then
+        missing_tools+=("Maven (mvn) or Maven wrapper (./mvnw)")
+    fi
+    
+    # Exit with error if any tools are missing
     if [ ${#missing_tools[@]} -ne 0 ]; then
         print_error "Missing required tools: ${missing_tools[*]}"
         print_info "Please install the missing tools and try again."
@@ -92,21 +191,27 @@ check_requirements() {
     fi
 }
 
-# Check git status
+# ==============================================================================
+# GIT REPOSITORY VALIDATION
+# ==============================================================================
+
+# Checks git repository status and warns about uncommitted changes
 check_git_status() {
+    # Verify we're in a git repository
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
         print_error "Not in a git repository"
         exit 1
     fi
     
-    # Fetch latest changes
+    # Fetch latest changes to ensure we're up to date
     print_info "Fetching latest changes from remote..."
     git fetch --all
     
+    # Show current branch information
     local current_branch=$(git branch --show-current)
     print_info "Current branch: $current_branch"
     
-    # Check if there are uncommitted changes
+    # Check for uncommitted changes and warn user
     if ! git diff-index --quiet HEAD --; then
         print_warning "You have uncommitted changes that will be included in the release."
         git status --short
@@ -119,27 +224,127 @@ check_git_status() {
     fi
 }
 
-print_info "=== Release Script ==="
+# ==============================================================================
+# MAVEN PROJECT MANAGEMENT
+# ==============================================================================
+
+# Updates the version in pom.xml using Maven versions plugin
+# Args: new_version (e.g., "1.2.3")
+update_pom_version() {
+    local new_version="$1"
+    
+    # Verify pom.xml exists
+    if [[ ! -f "pom.xml" ]]; then
+        print_error "pom.xml not found in current directory"
+        return 1
+    fi
+    
+    print_info "Updating POM version to $new_version..."
+    
+    # Use Maven wrapper if available, otherwise use system maven
+    local maven_cmd
+    if [[ -f "./mvnw" ]]; then
+        maven_cmd="./mvnw"
+        print_info "Using Maven wrapper (./mvnw)"
+    else
+        maven_cmd="mvn"
+        print_info "Using system Maven"
+    fi
+    
+    # Update version in POM using Maven versions plugin
+    if $maven_cmd versions:set -DnewVersion="$new_version" -DgenerateBackupPoms=false; then
+        print_success "POM version updated successfully"
+        return 0
+    else
+        print_error "Failed to update POM version"
+        return 1
+    fi
+}
+
+# Builds the JAR file using Maven
+# Args: version (used to locate the expected JAR file), artifact_id (project name)
+# Returns: path to the built JAR file (echoed to stdout)
+build_jar() {
+    local version="$1"
+    local artifact_id="$2"
+    
+    print_info "Building JAR file for project: $artifact_id"
+    
+    # Use Maven wrapper if available, otherwise use system maven
+    local maven_cmd
+    if [[ -f "./mvnw" ]]; then
+        maven_cmd="./mvnw"
+    else
+        maven_cmd="mvn"
+    fi
+    
+    # Build command with optional test skipping
+    local build_cmd="$maven_cmd clean package"
+    if [[ "$SKIP_TESTS" == "true" ]]; then
+        build_cmd="$build_cmd -DskipTests"
+        print_info "Running: $build_cmd (tests skipped)"
+    else
+        print_info "Running: $build_cmd (tests included)"
+    fi
+    
+    if $build_cmd; then
+        # Find the built JAR at expected location
+        local jar_file="target/${artifact_id}-${version}.jar"
+        if [[ -f "$jar_file" ]]; then
+            local jar_size=$(du -h "$jar_file" | cut -f1)
+            print_success "JAR built successfully: $jar_file ($jar_size)"
+            echo "$jar_file"  # Return the JAR path to caller
+            return 0
+        else
+            print_error "JAR file not found at expected location: $jar_file"
+            return 1
+        fi
+    else
+        print_error "Failed to build JAR"
+        return 1
+    fi
+}
+
+# ==============================================================================
+# MAIN SCRIPT EXECUTION
+# ==============================================================================
+
+print_info "=== Generic Maven Project Release Script ==="
 echo
 
-# Check requirements
+# Step 1: Verify all required tools are available
 check_requirements
 
-# Check git status
+# Step 2: Check git repository status and warn about uncommitted changes
 check_git_status
 
-# Get current version
+# Step 3: Detect project information
+print_info "Detecting project information..."
+project_name=$(get_project_info)
+if [[ $? -ne 0 || -z "$project_name" ]]; then
+    print_error "Failed to detect project information from pom.xml"
+    exit 1
+fi
+print_info "Project name: $project_name"
+
+# Step 4: Determine current version from VERSION file or POM
 current_version=""
-if [[ -f VERSION ]]; then
-    current_version=$(cat VERSION | tr -d '\n' | tr -d ' ')
-    print_info "Current version: $current_version"
+if [[ -f "$VERSION_FILE" ]]; then
+    current_version=$(cat "$VERSION_FILE" | tr -d '\n' | tr -d ' ')
+    print_info "Current version from $VERSION_FILE: $current_version"
+elif [[ -n "$(get_pom_version)" ]]; then
+    current_version=$(get_pom_version)
+    print_info "Current version from pom.xml: $current_version"
+    print_info "Creating $VERSION_FILE with current version"
+    echo "$current_version" > "$VERSION_FILE"
 else
-    print_warning "No VERSION file found. Starting with version 1.0.0"
-    current_version="1.0.0"
-    echo "$current_version" > VERSION
+    print_warning "No $VERSION_FILE found and could not extract version from pom.xml"
+    print_info "Starting with version $DEFAULT_STARTING_VERSION"
+    current_version="$DEFAULT_STARTING_VERSION"
+    echo "$current_version" > "$VERSION_FILE"
 fi
 
-# Ask user for version choice
+# Step 5: Present version increment options to user
 echo
 echo "Version options:"
 echo "1) Increment patch version (${current_version} -> $(increment_version "$current_version" "patch"))"
@@ -173,59 +378,107 @@ esac
 
 print_info "New version will be: $new_version"
 
-# Update VERSION file
-echo "$new_version" > VERSION
+# Step 6: Update version files
+echo "$new_version" > "$VERSION_FILE"
 
-# Get commit message
+# Update POM version to match
+if ! update_pom_version "$new_version"; then
+    print_error "Failed to update POM version. Release cancelled."
+    echo "$current_version" > "$VERSION_FILE"
+    exit 1
+fi
+
+# Step 7: Get commit message and release notes from user
 echo
 read -p "Enter release commit message [Release v$new_version]: " commit_msg
 if [[ -z "$commit_msg" ]]; then
     commit_msg="Release v$new_version"
 fi
 
-# Get release notes
 echo
 read -p "Enter release notes (optional): " release_notes
 if [[ -z "$release_notes" ]]; then
     release_notes="$commit_msg"
 fi
 
-# Show what will be committed
+# Step 8: Show what will be committed and get final confirmation
 echo
 print_info "Files to be committed:"
 git add .
 git status --short
 
 echo
+print_info "Release process will:"
+print_info "  1. Update POM version to $new_version"
+print_info "  2. Commit and push changes"
+print_info "  3. Create and push git tag v$new_version"
+print_info "  4. Build JAR file using Maven"
+print_info "  5. Create GitHub release with JAR attachment"
+print_info "  Project: $project_name"
+print_info "  JAR file: target/${project_name}-${new_version}.jar"
+echo
 read -p "Proceed with release? (y/N): " proceed_choice
 if [[ ! "$proceed_choice" =~ ^[Yy]$ ]]; then
     print_info "Release cancelled."
     # Restore VERSION file
-    echo "$current_version" > VERSION
+    echo "$current_version" > "$VERSION_FILE"
+    # Restore POM version
+    if [[ -f "pom.xml" ]]; then
+        print_info "Restoring POM version..."
+        update_pom_version "$current_version" > /dev/null 2>&1 || print_warning "Could not restore POM version"
+    fi
     exit 0
 fi
 
-# Commit and push changes
+# Step 9: Execute the release process
 print_info "Committing changes..."
 git commit -m "$commit_msg"
 
 print_info "Pushing changes to remote..."
 git push
 
-# Create and push tag
+# Step 10: Create and push git tag
 print_info "Creating and pushing tag v$new_version..."
 git tag -a "v$new_version" -m "Release v$new_version: $release_notes"
 git push origin "v$new_version"
 
-# Create GitHub release
+# Step 11: Build JAR file
+print_info "Building application JAR..."
+jar_path=$(build_jar "$new_version" "$project_name")
+if [[ $? -ne 0 || -z "$jar_path" ]]; then
+    print_error "Failed to build JAR. Release will continue without JAR attachment."
+    jar_path=""
+fi
+
+# Step 12: Create GitHub release with JAR attachment
 print_info "Creating GitHub release..."
-if gh release create "v$new_version" --title "Release v$new_version" --notes "$release_notes"; then
-    print_success "GitHub release created successfully!"
+if [[ -n "$jar_path" && -f "$jar_path" ]]; then
+    print_info "Attaching JAR to release: $jar_path"
+    if gh release create "v$new_version" --title "Release v$new_version" --notes "$release_notes" "$jar_path"; then
+        print_success "GitHub release created successfully with JAR attachment!"
+        print_info "JAR file: $(basename "$jar_path")"
+    else
+        print_warning "Failed to create GitHub release with JAR. Trying without JAR..."
+        if gh release create "v$new_version" --title "Release v$new_version" --notes "$release_notes"; then
+            print_success "GitHub release created successfully (without JAR)!"
+        else
+            print_warning "Failed to create GitHub release. You may need to create it manually."
+        fi
+    fi
 else
-    print_warning "Failed to create GitHub release. You may need to create it manually."
+    print_warning "No JAR file available. Creating release without JAR attachment..."
+    if gh release create "v$new_version" --title "Release v$new_version" --notes "$release_notes"; then
+        print_success "GitHub release created successfully!"
+    else
+        print_warning "Failed to create GitHub release. You may need to create it manually."
+    fi
 fi
 
 print_success "Release process completed successfully!"
+print_info "Project: $project_name"
 print_info "Version: v$new_version"
 print_info "Branch: $(git branch --show-current)"
 print_info "Commit: $(git rev-parse HEAD)"
+if [[ -n "$jar_path" && -f "$jar_path" ]]; then
+    print_info "JAR file: $jar_path ($(du -h "$jar_path" | cut -f1))"
+fi 

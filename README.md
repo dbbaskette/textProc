@@ -80,6 +80,7 @@ docker run -p 8080:8080 --name textproc --network host textproc
 - [Spring Cloud Stream](https://spring.io/projects/spring-cloud-stream)
 - [Apache Tika](https://tika.apache.org/)
 - [RabbitMQ](https://www.rabbitmq.com/)
+- [Release Process](docs/release-process.md) - Complete guide to releasing new versions
 
 Example for Spring Cloud Data Flow (SCDF) mode:
 
@@ -101,6 +102,28 @@ Switch profiles with:
 - Drop files into the input directory (e.g., `./data/input_files`)
 - Processed text will appear in the output directory
 - Errors and processed originals are moved to their respective directories
+
+---
+
+## 🚀 Releases
+
+This project uses a generic automated release script that works with any Maven project. The script automatically detects project details and handles the complete release process.
+
+### Quick Release
+```bash
+./release.sh
+```
+
+The script will:
+1. Auto-detect project name from `pom.xml`
+2. Update version numbers in `VERSION` and `pom.xml`
+3. Build the JAR file using Maven
+4. Create Git tags and push changes
+5. Create GitHub releases with JAR attachments
+
+**🔗 Generic Script**: [Maven Release Script Gist](https://gist.github.com/dbbaskette/5d0e5dd0fb841f39b6a1b77472b48b6b) - Reusable for any Maven project!
+
+For detailed information, see the [Release Process Documentation](docs/release-process.md).
 
 ---
 
