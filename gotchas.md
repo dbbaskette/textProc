@@ -35,6 +35,30 @@ This document contains important edge cases, known issues, and potential gotchas
 - Add checksums or file validation where possible
 - Monitor download processes for completeness
 
+### Text Chunking Issues ⭐ **FIXED**
+
+**Issue**: All files were showing as "1 chunk" regardless of file size, even for very large PDFs.
+
+**Symptoms**:
+- Large files (81MB, 263MB) reporting only 1 chunk
+- Chunk size of 256KB but chunk count always 1
+- Files much larger than chunk size not being split properly
+
+**Root Cause**: 
+- **Token vs Byte Confusion**: The `TokenTextSplitter` expects token counts, but was receiving byte counts
+- Passing 131,072 tokens (256KB ÷ 2) instead of appropriate token sizes (1000-2000 tokens)
+- This resulted in chunk sizes too large for proper splitting
+
+**Fix Applied** (v1.1.8+):
+- Convert byte-based chunk size to appropriate token counts using ratio of 1 token ≈ 3-4 characters
+- Use token chunk sizes between 1000-2000 tokens (down from 131,072 tokens)
+- Added proper logging of token conversion: `Using TokenTextSplitter with X tokens per chunk (converted from Y bytes)`
+
+**Result**:
+- Files now properly split into multiple chunks based on content size
+- Better text processing and streaming performance
+- More accurate chunk counting and reporting
+
 ### Large PDF Memory Issues
 
 **Issue**: Very large PDF files may cause out-of-memory errors during processing.
@@ -48,6 +72,34 @@ This document contains important edge cases, known issues, and potential gotchas
 1. Increase JVM heap size: `-Xmx4g` or higher
 2. Process files in smaller chunks
 3. Consider streaming processing for very large files
+
+## UI Features
+
+### Viewing Processed Text ⭐ **NEW FEATURE**
+
+**Feature**: Click on any filename in the web UI to view the processed text content.
+
+**How to Use**:
+1. Navigate to the file processing web interface (`/` or `/files`)
+2. Click on any filename in the processed files list
+3. The processed text opens in a new browser tab showing:
+   - All chunks with clear separators (`=== CHUNK X OF Y ===`)
+   - Full extracted text content
+   - Plain text format for easy reading
+
+**Implementation Details**:
+- Processed text is automatically saved to `/tmp/textproc_{filename}_chunked.txt`
+- Files are served via `/processed-text/{filename}` endpoint
+- Content type: `text/plain` with no caching
+- Automatic cleanup when system reboots (temp files in `/tmp`)
+
+**Benefits**:
+- Easy verification of text extraction quality
+- Debug processing issues by examining actual content
+- No need to access server filesystem directly
+- Files automatically cleaned up by system
+
+**Note**: This feature is available for all newly processed files. Files processed before this feature was added will not have clickable links until they are reprocessed.
 
 ## File Processing Edge Cases
 

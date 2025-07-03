@@ -358,6 +358,14 @@ public class ScdfStreamProcessor {
                                 logger.debug("Chunk {} size: {} characters", i, chunks.get(i).length());
                             }
                             
+                            // Write processed text to temp file for UI display
+                            try {
+                                Path tempTextFile = extractionService.writeChunkedTextToTempFile(filename, chunks);
+                                logger.info("Saved processed text for UI display: {}", tempTextFile);
+                            } catch (Exception e) {
+                                logger.warn("Failed to write processed text to temp file for {}: {}", filename, e.getMessage());
+                            }
+                            
                             // Process all chunks asynchronously
                             CompletableFuture.runAsync(() -> {
                                 try {

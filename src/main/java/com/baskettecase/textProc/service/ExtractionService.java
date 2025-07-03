@@ -10,8 +10,10 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
@@ -80,14 +82,22 @@ public class ExtractionService {
             // Process each page as a separate document
             List<Document> allChunks = new ArrayList<>();
             
-            // Configure the splitter with more appropriate settings for PDF content
-            // Using a smaller chunk size and more aggressive splitting for better handling of PDF content
+            // Configure the splitter with appropriate token-based settings
+            // Convert byte-based chunkSize to appropriate token count
+            // Typical ratio: 1 token ≈ 3-4 characters, so we use a conservative approach
+            int tokenChunkSize = Math.max(1000, Math.min(2000, chunkSize / 4)); // 1000-2000 tokens
+            int minChunkSize = Math.max(100, tokenChunkSize / 10); // 10% of chunk size
+            int minChunkLengthToEmbed = Math.max(20, tokenChunkSize / 50); // 2% of chunk size
+            
+            logger.info("[DIAG] Using TokenTextSplitter with {} tokens per chunk (converted from {} bytes)", 
+                       tokenChunkSize, chunkSize);
+            
             TokenTextSplitter splitter = new TokenTextSplitter(
-                chunkSize / 2,        // Smaller chunk size for PDFs
-                100,                   // Smaller min chunk size to avoid losing content
-                20,                    // Higher min length to embed to avoid very small chunks
-                1000,                  // Lower max chunks to prevent memory issues
-                true                   // Keep separator to maintain context
+                tokenChunkSize,           // Appropriate token-based chunk size (1000-2000 tokens)
+                minChunkSize,             // Minimum chunk size to avoid losing content
+                minChunkLengthToEmbed,    // Minimum length to embed to avoid very small chunks
+                1000,                     // Maximum number of chunks to prevent memory issues
+                true                      // Keep separator to maintain context
             );
             
             // Process each page separately to maintain page boundaries
@@ -239,5 +249,59 @@ public class ExtractionService {
         
         // Always return empty stream for graceful degradation
         return Stream.empty();
+    }
+
+    /**
+     * Writes extracted text to a temporary file for UI display.
+     * Files are stored in /tmp with a standardized naming convention.
+     *
+     * @param filename The original filename
+     * @param extractedText The extracted text content
+     * @return The path to the created temporary file
+     * @throws IOException If an I/O error occurs
+     */
+    public Path writeExtractedTextToTempFile(String filename, String extractedText) throws IOException {
+        // Create a safe filename for the temp file
+        String safeFilename = filename.replaceAll("[^a-zA-Z0-9._-]", "_");
+        Path tempFile = Paths.get("/tmp", "textproc_" + safeFilename + "_extracted.txt");
+        
+        // Write the extracted text to the temp file
+        Files.writeString(tempFile, extractedText, StandardCharsets.UTF_8);
+        
+        logger.info("Wrote extracted text to temporary file: {} ({} characters)", 
+                   tempFile, extractedText.length());
+        
+        return tempFile;
+    }
+    
+    /**
+     * Writes chunked text to a temporary file for UI display.
+     * Files are stored in /tmp with a standardized naming convention.
+     *
+     * @param filename The original filename
+     * @param chunks The text chunks
+     * @return The path to the created temporary file
+     * @throws IOException If an I/O error occurs
+     */
+    public Path writeChunkedTextToTempFile(String filename, List<String> chunks) throws IOException {
+        // Create a safe filename for the temp file
+        String safeFilename = filename.replaceAll("[^a-zA-Z0-9._-]", "_");
+        Path tempFile = Paths.get("/tmp", "textproc_" + safeFilename + "_chunked.txt");
+        
+        // Combine chunks with separators
+        StringBuilder combinedText = new StringBuilder();
+        for (int i = 0; i < chunks.size(); i++) {
+            combinedText.append("=== CHUNK ").append(i + 1).append(" OF ").append(chunks.size()).append(" ===\n");
+            combinedText.append(chunks.get(i));
+            combinedText.append("\n\n");
+        }
+        
+        // Write the combined text to the temp file
+        Files.writeString(tempFile, combinedText.toString(), StandardCharsets.UTF_8);
+        
+        logger.info("Wrote chunked text to temporary file: {} ({} chunks, {} total characters)", 
+                   tempFile, chunks.size(), combinedText.length());
+        
+        return tempFile;
     }
 }
