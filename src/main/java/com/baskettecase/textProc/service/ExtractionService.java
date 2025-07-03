@@ -64,7 +64,19 @@ public class ExtractionService {
             }
             
             logger.debug("Successfully extracted document with {} pages", documents.size());
-            
+
+            // Diagnostic: log the length and a snippet of each page's text
+            int pageNum = 0;
+            for (Document doc : documents) {
+                String pageText = doc.getText();
+                int len = (pageText != null) ? pageText.length() : 0;
+                logger.info("[DIAG] Page {} extracted text length: {}", pageNum, len);
+                if (pageText != null && !pageText.isEmpty()) {
+                    logger.info("[DIAG] Page {} first 300 chars: {}", pageNum, pageText.substring(0, Math.min(300, pageText.length())).replaceAll("\n", " "));
+                }
+                pageNum++;
+            }
+
             // Process each page as a separate document
             List<Document> allChunks = new ArrayList<>();
             
@@ -79,18 +91,25 @@ public class ExtractionService {
             );
             
             // Process each page separately to maintain page boundaries
+            pageNum = 0;
             for (Document doc : documents) {
                 String pageText = doc.getText();
                 if (pageText != null && !pageText.trim().isEmpty()) {
                     // Split each page's content into chunks
                     List<Document> pageChunks = splitter.apply(List.of(doc));
                     allChunks.addAll(pageChunks);
-                    
-                    logger.trace("Page split into {} chunks", pageChunks.size());
+                    logger.info("[DIAG] Page {} split into {} chunks", pageNum, pageChunks.size());
+                    for (int i = 0; i < pageChunks.size(); i++) {
+                        String chunkText = pageChunks.get(i).getText();
+                        int chunkLen = (chunkText != null) ? chunkText.length() : 0;
+                        logger.info("[DIAG] Page {} Chunk {} length: {} | First 150 chars: {}", pageNum, i, chunkLen, (chunkText != null ? chunkText.substring(0, Math.min(150, chunkText.length())).replaceAll("\n", " ") : ""));
+                    }
                 }
+                pageNum++;
             }
             
             logger.debug("Document split into {} total chunks across all pages", allChunks.size());
+            logger.info("[DIAG] Total chunks after splitting: {}", allChunks.size());
             
             // Return the text content of all chunks
             return allChunks.stream()
@@ -98,8 +117,7 @@ public class ExtractionService {
                 .filter(text -> text != null && !text.trim().isEmpty());
                 
         } catch (Exception e) {
-            logger.error("Error processing file: " + e.getMessage(), e);
-            return Stream.empty();
+            return handleExtractionError(filePath, e);
         }
     }
     
@@ -148,17 +166,78 @@ public class ExtractionService {
      */
     public String extractTextFromFile(Path filePath) throws IOException {
         logger.info("Extracting text from file: {}", filePath);
-        DocumentReader reader = new TikaDocumentReader(filePath.toString());
-        List<Document> documents = reader.get();
+        try {
+            DocumentReader reader = new TikaDocumentReader(filePath.toString());
+            List<Document> documents = reader.get();
+            
+            if (documents.isEmpty()) {
+                logger.warn("No content extracted from the document");
+                return "";
+            }
+            
+            // Combine all document pages into a single string
+            return documents.stream()
+                .map(Document::getText)
+                .reduce("", (a, b) -> a + "\n\n" + b);
+        } catch (RuntimeException e) {
+            // Handle the same error types but return empty string instead of stream
+            handleExtractionError(filePath, e);
+            return ""; // Return empty string for graceful degradation
+        }
+    }
+    
+    /**
+     * Handles extraction errors with specific categorization and appropriate responses.
+     * 
+     * @param filePath The path of the file that failed processing
+     * @param e The exception that occurred
+     * @return An empty stream (graceful degradation)
+     */
+    private Stream<String> handleExtractionError(Path filePath, Exception e) {
+        String fileName = filePath != null ? filePath.getFileName().toString() : "unknown";
+        String errorMessage = e.getMessage();
         
-        if (documents.isEmpty()) {
-            logger.warn("No content extracted from the document");
-            return "";
+        // Categorize the error type for better logging and potential recovery
+        if (errorMessage != null) {
+            if (errorMessage.contains("Missing root object specification in trailer") ||
+                errorMessage.contains("TIKA-198") ||
+                errorMessage.contains("Illegal IOException from org.apache.tika.parser.pdf.PDFParser")) {
+                
+                logger.error("CORRUPTED PDF detected: File '{}' appears to be corrupted or incomplete. " +
+                           "Error: Missing root object specification in trailer. " +
+                           "This typically indicates the PDF file was not completely downloaded or is malformed. " +
+                           "Consider re-downloading the file or checking the source.", fileName);
+                logger.debug("Full PDF corruption error details for file '{}':", fileName, e);
+                
+            } else if (errorMessage.contains("TikaException") || errorMessage.contains("org.apache.tika")) {
+                logger.error("TIKA PARSING ERROR: File '{}' could not be parsed by Apache Tika. " +
+                           "This may indicate an unsupported file format, corruption, or parsing limitations. " +
+                           "Error: {}", fileName, errorMessage);
+                logger.debug("Full Tika parsing error details for file '{}':", fileName, e);
+                
+            } else if (errorMessage.contains("IOException")) {
+                logger.error("FILE I/O ERROR: Unable to read file '{}'. " +
+                           "This may indicate file system issues, permission problems, or file corruption. " +
+                           "Error: {}", fileName, errorMessage);
+                logger.debug("Full I/O error details for file '{}':", fileName, e);
+                
+            } else if (errorMessage.contains("OutOfMemoryError") || errorMessage.contains("memory")) {
+                logger.error("MEMORY ERROR: Insufficient memory to process file '{}'. " +
+                           "Consider increasing heap size or processing smaller chunks. " +
+                           "Error: {}", fileName, errorMessage);
+                logger.debug("Full memory error details for file '{}':", fileName, e);
+                
+            } else {
+                logger.error("UNKNOWN EXTRACTION ERROR: Unexpected error processing file '{}'. " +
+                           "Error: {} - {}", fileName, e.getClass().getSimpleName(), errorMessage);
+                logger.debug("Full unknown error details for file '{}':", fileName, e);
+            }
+        } else {
+            logger.error("EXTRACTION ERROR: Error processing file '{}' - {}", fileName, e.getClass().getSimpleName());
+            logger.debug("Full error details for file '{}':", fileName, e);
         }
         
-        // Combine all document pages into a single string
-        return documents.stream()
-            .map(Document::getText)
-            .reduce("", (a, b) -> a + "\n\n" + b);
+        // Always return empty stream for graceful degradation
+        return Stream.empty();
     }
 }
