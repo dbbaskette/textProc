@@ -288,7 +288,7 @@ build_jar() {
         print_info "Running: $build_cmd (tests included)"
     fi
     
-    if $build_cmd; then
+    if $build_cmd >&2; then
         # Find the built JAR at expected location
         local jar_file="target/${artifact_id}-${version}.jar"
         if [[ -f "$jar_file" ]]; then
@@ -298,6 +298,8 @@ build_jar() {
             return 0
         else
             print_error "JAR file not found at expected location: $jar_file"
+            print_error "Available JAR files in target/:"
+            ls -la target/*.jar >&2 2>/dev/null || print_error "No JAR files found in target/"
             return 1
         fi
     else

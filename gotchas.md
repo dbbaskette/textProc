@@ -113,6 +113,45 @@ When encountering extraction failures:
 6. Validate source URL or file path
 7. Consider file size limitations
 
+## Release Script Issues
+
+### Maven Output Contamination
+
+**Issue**: The release script was failing to attach JAR files to GitHub releases, despite successfully building them.
+
+**Symptoms**:
+- Script shows: `[SUCCESS] JAR built successfully: target/textProc-X.X.X.jar`
+- But then shows: `[WARNING] No JAR file available. Creating release without JAR attachment...`
+- JAR file exists in target directory but script can't find it
+
+**Root Cause**: 
+- Maven command output was being captured by command substitution `$(build_jar ...)`
+- Maven outputs all build logs to stdout, contaminating the function return value
+- Function was returning thousands of lines of Maven output instead of just the JAR path
+
+**Resolution**:
+1. **Redirect Maven output to stderr**: Changed `if $build_cmd;` to `if $build_cmd >&2;`
+2. **Added debug output**: Shows available JAR files when expected file not found
+3. **Improved error handling**: Better diagnostics for JAR file detection
+
+**Prevention**:
+- Always redirect command output to stderr when using command substitution for return values
+- Test functions in isolation before integrating into larger scripts
+- Use proper output redirection: `>&2` for logs, stdout for return values
+
+### Version Synchronization Issues
+
+**Issue**: POM version and VERSION file can get out of sync, causing build failures.
+
+**Symptoms**:
+- Script builds JAR with different version than expected
+- File not found errors for JAR files
+
+**Resolution**:
+- Ensure POM version is updated before building JAR
+- The release script handles this automatically via `update_pom_version` function
+
 ## Version History
 
+- v1.1.3: Fixed critical bug in release script where Maven output was contaminating JAR path variable
 - v0.0.11: Enhanced error handling and categorization for PDF corruption issues 
