@@ -264,10 +264,34 @@ create_github_release_with_retry() {
             print_info "JAR file size: $jar_size"
             
             # Attempt release creation with JAR
-            if timeout $UPLOAD_TIMEOUT gh release create "$version" \
-                --title "$title" \
-                --notes "$notes" \
-                "$jar_path" 2>/dev/null; then
+            local upload_success=false
+            if command -v timeout &> /dev/null; then
+                print_info "Using timeout command for upload protection"
+                if timeout $UPLOAD_TIMEOUT gh release create "$version" \
+                    --title "$title" \
+                    --notes "$notes" \
+                    "$jar_path" 2>/dev/null; then
+                    upload_success=true
+                fi
+            elif command -v gtimeout &> /dev/null; then
+                print_info "Using gtimeout command for upload protection"
+                if gtimeout $UPLOAD_TIMEOUT gh release create "$version" \
+                    --title "$title" \
+                    --notes "$notes" \
+                    "$jar_path" 2>/dev/null; then
+                    upload_success=true
+                fi
+            else
+                print_warning "No timeout command available - relying on GitHub CLI timeout only"
+                if gh release create "$version" \
+                    --title "$title" \
+                    --notes "$notes" \
+                    "$jar_path" 2>/dev/null; then
+                    upload_success=true
+                fi
+            fi
+            
+            if $upload_success; then
                 print_success "GitHub release created successfully with JAR attachment!"
                 print_info "JAR file: $(basename "$jar_path") ($jar_size)"
                 return 0

@@ -182,8 +182,34 @@ If automatic upload fails, manually attach JAR:
 gh release upload v1.0.0 target/project-1.0.0.jar
 ```
 
+### Exit Code 127 (Command Not Found)
+
+**Issue**: Release script fails with exit code 127 during JAR upload attempts.
+
+**Symptoms**:
+- `[WARNING] Attempt X failed to create release with JAR (exit code: 127)`
+- Script shows all retry attempts failing with the same error code
+- Release is created without JAR attachment
+
+**Root Cause**: 
+- Exit code 127 means "command not found"
+- The `timeout` command is not available on macOS by default
+- Script was trying to use a non-existent timeout wrapper
+
+**Resolution**:
+1. **Automatic detection**: Script now detects available timeout commands
+2. **macOS compatibility**: Uses `gtimeout` if available (via Homebrew: `brew install coreutils`)
+3. **Graceful fallback**: Falls back to GitHub CLI's built-in timeout if no timeout command exists
+4. **No timeout dependency**: Works without external timeout commands
+
+**Prevention**:
+- Install GNU coreutils on macOS: `brew install coreutils`
+- Script automatically handles different timeout command availability
+- No manual intervention required
+
 ## Version History
 
+- v1.1.7: Fixed exit code 127 error by improving timeout command detection for macOS compatibility
 - v1.1.6: Added retry logic and timeout handling for GitHub CLI JAR uploads
 - v1.1.5: Tested and verified JAR path fix works correctly  
 - v1.1.4: Created new gist with fixed release script (https://gist.github.com/dbbaskette/e3c3b0c7ff90c715c6b11ca1e45bb3a6)
