@@ -121,7 +121,7 @@ The script will:
 4. Create Git tags and push changes
 5. Create GitHub releases with JAR attachments
 
-**🔗 Generic Script**: [Maven Release Script Gist](https://gist.github.com/dbbaskette/5d0e5dd0fb841f39b6a1b77472b48b6b) - Reusable for any Maven project!
+**🔗 Generic Script**: [Maven Release Script Gist](https://gist.github.com/dbbaskette/e3c3b0c7ff90c715c6b11ca1e45bb3a6) - Reusable for any Maven project!
 
 For detailed information, see the [Release Process Documentation](docs/release-process.md).
 

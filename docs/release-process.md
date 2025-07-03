@@ -4,7 +4,7 @@
 
 The `release.sh` script is now a generic Maven project release script that automates the complete release process for any Maven project, including TextProc. The script automatically detects project details from `pom.xml` and handles versioning, building, and GitHub release creation.
 
-**🔗 Source**: [Generic Maven Release Script Gist](https://gist.github.com/dbbaskette/5d0e5dd0fb841f39b6a1b77472b48b6b)
+**🔗 Source**: [Generic Maven Release Script Gist](https://gist.github.com/dbbaskette/e3c3b0c7ff90c715c6b11ca1e45bb3a6)
 
 ## Prerequisites
 

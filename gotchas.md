@@ -153,5 +153,6 @@ When encountering extraction failures:
 
 ## Version History
 
-- v1.1.3: Fixed critical bug in release script where Maven output was contaminating JAR path variable
+- v1.1.4: Created new gist with fixed release script (https://gist.github.com/dbbaskette/e3c3b0c7ff90c715c6b11ca1e45bb3a6)
+- v1.1.3: Fixed critical bug in release script where Maven output was contaminating JAR path variable  
 - v0.0.11: Enhanced error handling and categorization for PDF corruption issues 
