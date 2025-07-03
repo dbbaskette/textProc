@@ -23,6 +23,13 @@
 # The script will interactively guide you through the release process.
 # Works with any Maven project by automatically detecting project details.
 # 
+# Environment Variables (optional):
+# - VERSION_FILE: Name of the version file (default: VERSION)
+# - SKIP_TESTS: Skip tests during build (default: true)
+# - DEFAULT_STARTING_VERSION: Version to use if no VERSION file exists (default: 1.0.0)
+# - UPLOAD_RETRY_COUNT: Number of retry attempts for JAR upload (default: 3)
+# - UPLOAD_TIMEOUT: Timeout in seconds for GitHub CLI operations (default: 300)
+# 
 # ==============================================================================
 
 set -e  # Exit on any error
@@ -35,6 +42,8 @@ set -e  # Exit on any error
 VERSION_FILE="${VERSION_FILE:-VERSION}"
 SKIP_TESTS="${SKIP_TESTS:-true}"
 DEFAULT_STARTING_VERSION="${DEFAULT_STARTING_VERSION:-1.0.0}"
+UPLOAD_RETRY_COUNT="${UPLOAD_RETRY_COUNT:-3}"
+UPLOAD_TIMEOUT="${UPLOAD_TIMEOUT:-300}"  # 5 minutes for large JARs
 
 # ==============================================================================
 # TERMINAL COLORS SETUP
@@ -222,6 +231,78 @@ check_git_status() {
             print_info "Release cancelled."
             exit 0
         fi
+    fi
+}
+
+# ==============================================================================
+# GITHUB RELEASE MANAGEMENT
+# ==============================================================================
+
+# Creates GitHub release with retry logic and timeout handling
+# Args: version, title, notes, jar_path (optional)
+# Returns: 0 on success, 1 on failure
+create_github_release_with_retry() {
+    local version="$1"
+    local title="$2"
+    local notes="$3"
+    local jar_path="$4"
+    
+    print_info "Configuring GitHub CLI timeout to ${UPLOAD_TIMEOUT} seconds"
+    
+    # Configure GitHub CLI for longer timeouts (for large files)
+    export GH_REQUEST_TIMEOUT="${UPLOAD_TIMEOUT}s"
+    
+    local attempt=1
+    local max_attempts=$UPLOAD_RETRY_COUNT
+    
+    while [ $attempt -le $max_attempts ]; do
+        print_info "Release creation attempt $attempt of $max_attempts"
+        
+        if [[ -n "$jar_path" && -f "$jar_path" ]]; then
+            print_info "Attempting to create release with JAR attachment: $jar_path"
+            local jar_size=$(du -h "$jar_path" | cut -f1)
+            print_info "JAR file size: $jar_size"
+            
+            # Attempt release creation with JAR
+            if timeout $UPLOAD_TIMEOUT gh release create "$version" \
+                --title "$title" \
+                --notes "$notes" \
+                "$jar_path" 2>/dev/null; then
+                print_success "GitHub release created successfully with JAR attachment!"
+                print_info "JAR file: $(basename "$jar_path") ($jar_size)"
+                return 0
+            else
+                local exit_code=$?
+                print_warning "Attempt $attempt failed to create release with JAR (exit code: $exit_code)"
+                
+                if [ $attempt -eq $max_attempts ]; then
+                    print_warning "All JAR upload attempts failed. Creating release without JAR..."
+                    break
+                else
+                    print_info "Waiting 10 seconds before retry..."
+                    sleep 10
+                fi
+            fi
+        else
+            # No JAR file provided, create release without attachment
+            break
+        fi
+        
+        attempt=$((attempt + 1))
+    done
+    
+    # Final attempt: Create release without JAR
+    print_info "Creating GitHub release without JAR attachment..."
+    if gh release create "$version" --title "$title" --notes "$notes"; then
+        print_success "GitHub release created successfully!"
+        if [[ -n "$jar_path" && -f "$jar_path" ]]; then
+            print_info "JAR file can be manually attached: $jar_path"
+            print_info "Manual upload command: gh release upload $version '$jar_path'"
+        fi
+        return 0
+    else
+        print_error "Failed to create GitHub release"
+        return 1
     fi
 }
 
@@ -416,9 +497,10 @@ print_info "  1. Update POM version to $new_version"
 print_info "  2. Commit and push changes"
 print_info "  3. Create and push git tag v$new_version"
 print_info "  4. Build JAR file using Maven"
-print_info "  5. Create GitHub release with JAR attachment"
+print_info "  5. Create GitHub release with JAR attachment (with retry logic)"
 print_info "  Project: $project_name"
 print_info "  JAR file: target/${project_name}-${new_version}.jar"
+print_info "  Upload timeout: ${UPLOAD_TIMEOUT}s, Max retries: $UPLOAD_RETRY_COUNT"
 echo
 read -p "Proceed with release? (y/N): " proceed_choice
 if [[ ! "$proceed_choice" =~ ^[Yy]$ ]]; then
@@ -454,26 +536,13 @@ if [[ $? -ne 0 || -z "$jar_path" ]]; then
 fi
 
 # Step 12: Create GitHub release with JAR attachment
-print_info "Creating GitHub release..."
-if [[ -n "$jar_path" && -f "$jar_path" ]]; then
-    print_info "Attaching JAR to release: $jar_path"
-    if gh release create "v$new_version" --title "Release v$new_version" --notes "$release_notes" "$jar_path"; then
-        print_success "GitHub release created successfully with JAR attachment!"
-        print_info "JAR file: $(basename "$jar_path")"
-    else
-        print_warning "Failed to create GitHub release with JAR. Trying without JAR..."
-        if gh release create "v$new_version" --title "Release v$new_version" --notes "$release_notes"; then
-            print_success "GitHub release created successfully (without JAR)!"
-        else
-            print_warning "Failed to create GitHub release. You may need to create it manually."
-        fi
-    fi
-else
-    print_warning "No JAR file available. Creating release without JAR attachment..."
-    if gh release create "v$new_version" --title "Release v$new_version" --notes "$release_notes"; then
-        print_success "GitHub release created successfully!"
-    else
-        print_warning "Failed to create GitHub release. You may need to create it manually."
+print_info "Creating GitHub release with retry logic..."
+if ! create_github_release_with_retry "v$new_version" "Release v$new_version" "$release_notes" "$jar_path"; then
+    print_warning "Failed to create GitHub release. You may need to create it manually."
+    print_info "Manual commands:"
+    print_info "  gh release create v$new_version --title 'Release v$new_version' --notes '$release_notes'"
+    if [[ -n "$jar_path" && -f "$jar_path" ]]; then
+        print_info "  gh release upload v$new_version '$jar_path'"
     fi
 fi
 

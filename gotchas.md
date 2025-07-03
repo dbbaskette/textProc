@@ -151,8 +151,41 @@ When encountering extraction failures:
 - Ensure POM version is updated before building JAR
 - The release script handles this automatically via `update_pom_version` function
 
+### GitHub CLI Upload Timeouts
+
+**Issue**: Large JAR files (>100MB) may timeout during upload to GitHub releases.
+
+**Symptoms**:
+- `Post "https://api.github.com/graphql": net/http: TLS handshake timeout`
+- JAR built successfully but fails to attach to GitHub release
+- Release created without JAR attachment
+
+**Root Cause**: 
+- Default GitHub CLI timeout is too short for large files
+- Network connectivity issues during upload
+- GitHub API rate limiting or server issues
+
+**Resolution**:
+1. **Automatic retry logic**: Script now retries JAR upload up to 3 times
+2. **Extended timeouts**: GitHub CLI timeout increased to 5 minutes (300s)
+3. **Graceful fallback**: Creates release without JAR if all uploads fail
+4. **Manual upload option**: Provides commands for manual JAR attachment
+
+**Configuration**:
+- `UPLOAD_RETRY_COUNT`: Number of retry attempts (default: 3)
+- `UPLOAD_TIMEOUT`: Timeout in seconds (default: 300)
+- Example: `UPLOAD_TIMEOUT=600 UPLOAD_RETRY_COUNT=5 ./release.sh`
+
+**Manual Recovery**:
+If automatic upload fails, manually attach JAR:
+```bash
+gh release upload v1.0.0 target/project-1.0.0.jar
+```
+
 ## Version History
 
+- v1.1.6: Added retry logic and timeout handling for GitHub CLI JAR uploads
+- v1.1.5: Tested and verified JAR path fix works correctly  
 - v1.1.4: Created new gist with fixed release script (https://gist.github.com/dbbaskette/e3c3b0c7ff90c715c6b11ca1e45bb3a6)
 - v1.1.3: Fixed critical bug in release script where Maven output was contaminating JAR path variable  
 - v0.0.11: Enhanced error handling and categorization for PDF corruption issues 
