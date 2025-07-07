@@ -53,11 +53,10 @@ public class ExtractionService {
             logger.info("Starting text extraction from file: {} (size: {} bytes, {} MB)", 
                       filePath, fileSize, String.format("%.2f", fileSize / (1024.0 * 1024.0)));
             
-            // Use Spring AI's TikaDocumentReader to read the document with file URI
-            String fileUri = filePath.toUri().toString();
-            logger.debug("Reading document from URI: {}", fileUri);
+            // Use Spring AI's TikaDocumentReader to read the document with file path
+            logger.debug("Reading document from file path: {}", filePath);
             
-            DocumentReader reader = new TikaDocumentReader(fileUri);
+            DocumentReader reader = new TikaDocumentReader(filePath.toFile().getAbsolutePath());
             List<Document> documents = reader.get();
             
             if (documents.isEmpty()) {
@@ -177,7 +176,7 @@ public class ExtractionService {
     public String extractTextFromFile(Path filePath) throws IOException {
         logger.info("Extracting text from file: {}", filePath);
         try {
-            DocumentReader reader = new TikaDocumentReader(filePath.toString());
+            DocumentReader reader = new TikaDocumentReader(filePath.toFile().getAbsolutePath());
             List<Document> documents = reader.get();
             
             if (documents.isEmpty()) {

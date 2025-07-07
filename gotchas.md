@@ -165,6 +165,28 @@ When encountering extraction failures:
 6. Validate source URL or file path
 7. Consider file size limitations
 
+## TikaDocumentReader Path Issue ⭐ **FIXED**
+
+**Issue**: The `TikaDocumentReader` was interpreting file paths as classpath resources instead of file system paths.
+
+**Symptoms**:
+- Error: `class path resource [home/vcap/tmp/...] cannot be opened because it does not exist`
+- Files downloaded successfully but extraction fails
+- Processing stops with `FileNotFoundException`
+
+**Root Cause**: 
+- `TikaDocumentReader` constructor was receiving URI strings that it interpreted as classpath resources
+- The path `/home/vcap/tmp/hdfs-downloads...` was being treated as a classpath resource
+
+**Solution**: 
+- Changed to use `filePath.toFile().getAbsolutePath()` instead of `filePath.toString()`
+- This provides the absolute file system path that `TikaDocumentReader` expects
+
+**Files Changed**:
+- `src/main/java/com/baskettecase/textProc/service/ExtractionService.java`
+
+**Status**: ✅ Fixed in version 1.3.0
+
 ## Release Script Issues
 
 ### Maven Output Contamination
