@@ -286,8 +286,11 @@ public class ScdfStreamProcessor {
             baseUrl = baseUrl.substring(0, baseUrl.indexOf("/webhdfs/v1/") + "/webhdfs/v1".length());
         }
         
-        // Create the processed files directory path
-        String processedFilePath = "/processed_files/" + filename + ".txt";
+        // URL encode the filename to handle spaces and special characters
+        String encodedFilename = java.net.URLEncoder.encode(filename, StandardCharsets.UTF_8.name());
+        
+        // Create the processed files directory path with encoded filename
+        String processedFilePath = "/processed_files/" + encodedFilename + ".txt";
         
         // Build the WebHDFS CREATE URL
         String createUrl = baseUrl + processedFilePath + "?op=CREATE&overwrite=true";
@@ -416,7 +419,6 @@ public class ScdfStreamProcessor {
                             fileInfo.getOutputStream()
                         );
                         
-                        processedFiles.put(fileKey, true);
                         logger.info("Processing new file: {}", webhdfsUrl);
                         
                         // Download the file once and process it
@@ -453,6 +455,10 @@ public class ScdfStreamProcessor {
                             // Write the full processed text to HDFS
                             String processedFileUrl = writeProcessedFileToHdfs(webhdfsUrl, filename, processedText);
                             logger.info("Successfully wrote processed file to HDFS: {}", processedFileUrl);
+                            
+                            // Only mark as processed after successful completion
+                            processedFiles.put(fileKey, true);
+                            logger.info("Successfully processed and tracked file: {}", webhdfsUrl);
                             
                             // Create a message with the same format pointing to the processed file
                             String processedMessage = createProcessedFileMessage(processedFileUrl, root);
