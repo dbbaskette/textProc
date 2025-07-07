@@ -6,6 +6,7 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.document.DocumentReader;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -56,7 +57,7 @@ public class ExtractionService {
             // Use Spring AI's TikaDocumentReader to read the document with file path
             logger.debug("Reading document from file path: {}", filePath);
             
-            DocumentReader reader = new TikaDocumentReader(filePath.toFile().getAbsolutePath());
+            DocumentReader reader = new TikaDocumentReader(new FileSystemResource(filePath.toFile()));
             List<Document> documents = reader.get();
             
             if (documents.isEmpty()) {
@@ -176,7 +177,7 @@ public class ExtractionService {
     public String extractTextFromFile(Path filePath) throws IOException {
         logger.info("Extracting text from file: {}", filePath);
         try {
-            DocumentReader reader = new TikaDocumentReader(filePath.toFile().getAbsolutePath());
+            DocumentReader reader = new TikaDocumentReader(new FileSystemResource(filePath.toFile()));
             List<Document> documents = reader.get();
             
             if (documents.isEmpty()) {
