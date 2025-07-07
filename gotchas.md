@@ -267,3 +267,93 @@ gh release upload v1.0.0 target/project-1.0.0.jar
 - v1.1.4: Created new gist with fixed release script (https://gist.github.com/dbbaskette/e3c3b0c7ff90c715c6b11ca1e45bb3a6)
 - v1.1.3: Fixed critical bug in release script where Maven output was contaminating JAR path variable  
 - v0.0.11: Enhanced error handling and categorization for PDF corruption issues 
+
+## File Processing Issues
+
+### Chunking Logic Fixed
+**Issue**: Large files were showing only 1 chunk despite 256KB chunk size setting.
+
+**Root Cause**: The chunking logic was confusing byte sizes with token counts. The TokenTextSplitter expects token counts, not byte sizes.
+
+**Solution**: Modified `ExtractionService.extractTextInChunks()` to convert byte chunk sizes to appropriate token counts (1000-2000 tokens).
+
+**Files Changed**:
+- `src/main/java/com/baskettecase/textProc/service/ExtractionService.java`
+
+### HDFS Processing Workflow Change
+**Issue**: Sending large chunks to RabbitMQ queue was causing performance issues and queue overload.
+
+**Root Cause**: The processor was downloading files, chunking them, and sending all chunks to the output queue, which was inefficient for large files.
+
+**Solution**: Changed workflow to write full processed text files to HDFS `/processed_files/` directory instead of sending chunks to the queue.
+
+**New Workflow**:
+1. Download file from HDFS
+2. Extract full text content
+3. Write processed text to `/processed_files/{filename}.txt` in HDFS
+4. Send message to output queue with processed file URL (same format as input)
+5. Return success message with HDFS URL
+6. Update UI with processing status
+
+**Benefits**:
+- Reduces queue load (no large chunks)
+- Improves performance
+- Maintains file accessibility in HDFS
+- Preserves UI functionality
+- Signals downstream processors with processed file location
+
+**Files Changed**:
+- `src/main/java/com/baskettecase/textProc/processor/ScdfStreamProcessor.java`
+
+## Network and Timeout Issues
+
+### GitHub Release Script Timeout
+**Issue**: JAR upload to GitHub releases failed with network timeout.
+
+**Root Cause**: Default GitHub CLI timeout was too short for large JAR files.
+
+**Solution**: Enhanced release script with:
+- Retry logic for JAR uploads
+- Increased GitHub CLI timeouts
+- Fallback to create releases without JAR attachments if uploads fail
+
+**Files Changed**:
+- `release.sh` (updated gist)
+
+### macOS Timeout Command Missing
+**Issue**: Release script failed with exit code 127 on macOS.
+
+**Root Cause**: `timeout` command not available on macOS by default.
+
+**Solution**: Added detection for `timeout` vs `gtimeout` (Homebrew) and fallback to GitHub CLI's built-in timeout.
+
+**Files Changed**:
+- `release.sh` (updated gist)
+
+## Maven Build Issues
+
+### Maven Output Contamination
+**Issue**: JAR upload to GitHub releases failed due to Maven output contaminating the JAR path variable.
+
+**Root Cause**: Release script lacked proper redirection of Maven output to stderr.
+
+**Solution**: Fixed script to redirect Maven output to stderr and updated gist with corrected version.
+
+**Files Changed**:
+- `release.sh` (updated gist)
+
+## UI Enhancements
+
+### Processed Text Display
+**Issue**: Users wanted to view processed text content when clicking on filenames.
+
+**Solution**: Added functionality to:
+- Write processed text to temporary files in `/tmp`
+- Serve processed text via new controller endpoint
+- Make filenames clickable links in UI
+- Display processed text in new browser tab
+
+**Files Changed**:
+- `src/main/java/com/baskettecase/textProc/service/ExtractionService.java`
+- `src/main/java/com/baskettecase/textProc/controller/FileProcessingController.java`
+- `src/main/resources/templates/files.html` 

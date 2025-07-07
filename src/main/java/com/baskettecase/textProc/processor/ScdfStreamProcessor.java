@@ -270,6 +270,94 @@ public class ScdfStreamProcessor {
         }
     }
 
+    /**
+     * Writes processed text to HDFS using WebHDFS REST API.
+     * 
+     * @param hdfsBaseUrl The base WebHDFS URL (e.g., http://namenode:50070/webhdfs/v1)
+     * @param filename The filename to write
+     * @param content The text content to write
+     * @return The HDFS URL of the written file
+     * @throws IOException if an I/O error occurs
+     */
+    private String writeProcessedFileToHdfs(String hdfsBaseUrl, String filename, String content) throws IOException {
+        // Extract the base HDFS URL from the input file URL
+        String baseUrl = hdfsBaseUrl;
+        if (baseUrl.contains("/webhdfs/v1/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.indexOf("/webhdfs/v1/") + "/webhdfs/v1".length());
+        }
+        
+        // Create the processed files directory path
+        String processedFilePath = "/processed_files/" + filename + ".txt";
+        
+        // Build the WebHDFS CREATE URL
+        String createUrl = baseUrl + processedFilePath + "?op=CREATE&overwrite=true";
+        
+        logger.info("Writing processed file to HDFS: {}", createUrl);
+        
+        // Create HTTP connection
+        java.net.URL url = new java.net.URL(createUrl);
+        java.net.HttpURLConnection connection = (java.net.HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("PUT");
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "text/plain");
+        
+        try (java.io.OutputStream os = connection.getOutputStream()) {
+            byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+            os.write(contentBytes);
+            os.flush();
+        }
+        
+        int responseCode = connection.getResponseCode();
+        if (responseCode == 201) {
+            logger.info("Successfully wrote processed file to HDFS: {}", processedFilePath);
+            return baseUrl + processedFilePath;
+        } else {
+            String errorMessage = "Failed to write to HDFS. Response code: " + responseCode;
+            try (java.io.InputStream errorStream = connection.getErrorStream()) {
+                if (errorStream != null) {
+                    errorMessage += ", Error: " + new String(errorStream.readAllBytes(), StandardCharsets.UTF_8);
+                }
+            }
+            throw new IOException(errorMessage);
+        }
+    }
+    
+    /**
+     * Creates a message with the same format as the input message but pointing to the processed file.
+     * 
+     * @param processedFileUrl The URL of the processed file in HDFS
+     * @param originalMessage The original message JSON node
+     * @return JSON string with the same format but updated URL
+     */
+    private String createProcessedFileMessage(String processedFileUrl, JsonNode originalMessage) {
+        try {
+            // Create a new JSON object with the same structure
+            com.fasterxml.jackson.databind.node.ObjectNode messageNode = objectMapper.createObjectNode();
+            
+            // Copy all fields from the original message
+            messageNode.put("type", "HDFS");
+            messageNode.put("url", processedFileUrl);
+            
+            // Copy optional fields if they exist
+            if (originalMessage.has("inputStream")) {
+                messageNode.put("inputStream", originalMessage.get("inputStream").asText());
+            }
+            if (originalMessage.has("outputStream")) {
+                messageNode.put("outputStream", originalMessage.get("outputStream").asText());
+            }
+            
+            // Add a flag to indicate this is a processed file
+            messageNode.put("processed", true);
+            messageNode.put("originalFile", originalMessage.get("url").asText());
+            
+            return objectMapper.writeValueAsString(messageNode);
+        } catch (Exception e) {
+            logger.error("Failed to create processed file message", e);
+            // Fallback to simple JSON
+            return "{\"type\":\"HDFS\",\"url\":\"" + processedFileUrl + "\",\"processed\":true}";
+        }
+    }
+
     @Bean
     public Function<Message<String>, Message<byte[]>> textProc() {
         return inputMsg -> {
@@ -334,12 +422,11 @@ public class ScdfStreamProcessor {
                         // Download the file once and process it
                         Path tempFile = downloadHdfsFile(webhdfsUrl);
                         try {
-                            // Process the downloaded file in chunks
-                            List<String> chunks = extractionService.extractTextInChunks(tempFile, CHUNK_SIZE)
-                                .collect(Collectors.toList());
+                            // Extract the full text content
+                            String processedText = extractionService.extractTextFromFile(tempFile);
                             
-                            if (chunks.isEmpty()) {
-                                logger.warn("No chunks were generated for file: {}", webhdfsUrl);
+                            if (processedText == null || processedText.trim().isEmpty()) {
+                                logger.warn("No text was extracted from file: {}", webhdfsUrl);
                                 return MessageBuilder.withPayload(new byte[0])
                                         .copyHeaders(inputMsg.getHeaders())
                                         .build();
@@ -347,58 +434,52 @@ public class ScdfStreamProcessor {
                             
                             // Update file info with processing results using the temporary file
                             fileInfo.setFileSize(Files.size(tempFile));
-                            fileInfo.setChunkCount(chunks.size());
+                            fileInfo.setChunkCount(1); // Single processed file
                             fileInfo.setStatus("COMPLETED");
                             fileInfo.setFileType(Files.probeContentType(tempFile));
                             fileProcessingService.addProcessedFile(fileInfo);
                             
-                            // Log chunk information
-                            logger.info("Processed {} chunks for file: {}", chunks.size(), webhdfsUrl);
-                            for (int i = 0; i < chunks.size(); i++) {
-                                logger.debug("Chunk {} size: {} characters", i, chunks.get(i).length());
-                            }
+                            // Log processing information
+                            logger.info("Extracted {} characters from file: {}", processedText.length(), webhdfsUrl);
                             
                             // Write processed text to temp file for UI display
                             try {
-                                Path tempTextFile = extractionService.writeChunkedTextToTempFile(filename, chunks);
+                                Path tempTextFile = extractionService.writeExtractedTextToTempFile(filename, processedText);
                                 logger.info("Saved processed text for UI display: {}", tempTextFile);
                             } catch (Exception e) {
                                 logger.warn("Failed to write processed text to temp file for {}: {}", filename, e.getMessage());
                             }
                             
-                            // Process all chunks asynchronously
-                            CompletableFuture.runAsync(() -> {
-                                try {
-                                    for (int i = 0; i < chunks.size(); i++) {
-                                        String chunk = chunks.get(i);
-                                        logger.info("Sending chunk {} of size: {} characters to output channel", i, chunk.length());
-                                        
-                                        // Send chunk using StreamBridge
-                                        boolean sent = streamBridge.send("output-out-0", 
-                                            MessageBuilder.withPayload(chunk.getBytes(StandardCharsets.UTF_8))
-                                                .copyHeaders(headers)
-                                                .setHeader("chunkIndex", i)
-                                                .setHeader("totalChunks", chunks.size())
-                                                .build());
-                                                
-                                        if (!sent) {
-                                            logger.error("Failed to send chunk {} to output channel", i);
-                                        } else {
-                                            logger.debug("Successfully sent chunk {} to output channel", i);
-                                        }
-                                    }
-                                } catch (Exception e) {
-                                    logger.error("Error processing chunks", e);
-                                }
-                            });
+                            // Write the full processed text to HDFS
+                            String processedFileUrl = writeProcessedFileToHdfs(webhdfsUrl, filename, processedText);
+                            logger.info("Successfully wrote processed file to HDFS: {}", processedFileUrl);
                             
-                            // Return the first chunk immediately
-                            String firstChunk = chunks.get(0);
-                            logger.info("Returning first chunk of size: {} characters", firstChunk.length());
-                            return MessageBuilder.withPayload(firstChunk.getBytes(StandardCharsets.UTF_8))
+                            // Create a message with the same format pointing to the processed file
+                            String processedMessage = createProcessedFileMessage(processedFileUrl, root);
+                            logger.info("Sending processed file message to queue: {}", processedMessage);
+                            
+                            // Send the processed file message to the output queue
+                            boolean sent = streamBridge.send("output-out-0", 
+                                MessageBuilder.withPayload(processedMessage.getBytes(StandardCharsets.UTF_8))
                                     .copyHeaders(headers)
-                                    .setHeader("chunkIndex", 0)
-                                    .setHeader("totalChunks", chunks.size())
+                                    .setHeader("originalFile", webhdfsUrl)
+                                    .setHeader("processedFileUrl", processedFileUrl)
+                                    .setHeader("extractedTextLength", processedText.length())
+                                    .build());
+                                    
+                            if (!sent) {
+                                logger.error("Failed to send processed file message to output queue");
+                            } else {
+                                logger.debug("Successfully sent processed file message to output queue");
+                            }
+                            
+                            // Return a success message
+                            String successMessage = "Processed file written to HDFS: " + processedFileUrl;
+                            return MessageBuilder.withPayload(successMessage.getBytes(StandardCharsets.UTF_8))
+                                    .copyHeaders(headers)
+                                    .setHeader("processedFileUrl", processedFileUrl)
+                                    .setHeader("originalFile", webhdfsUrl)
+                                    .setHeader("extractedTextLength", processedText.length())
                                     .build();
                             
                         } finally {
