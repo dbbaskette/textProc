@@ -43,30 +43,41 @@ public class FileProcessingController {
 
     /**
      * Serves processed text files for display in the browser.
-     * Files are stored in /tmp with a standardized naming convention.
+     * Files are stored in HDFS with a standardized naming convention.
      * @param filename The safe filename to retrieve
      * @return The processed text content for display
      */
     @GetMapping("/processed-text/{filename}")
     public ResponseEntity<String> getProcessedText(@PathVariable String filename) {
         try {
-            // Create the expected temp file path
-            String safeFilename = filename.replaceAll("[^a-zA-Z0-9._-]", "_");
-            Path filePath = Paths.get("/tmp", "textproc_" + safeFilename + "_chunked.txt");
+            // URL encode the filename for HDFS path
+            String encodedFilename = java.net.URLEncoder.encode(filename, java.nio.charset.StandardCharsets.UTF_8.name());
             
-            if (!Files.exists(filePath)) {
-                return new ResponseEntity<>("File not found: " + filename, HttpStatus.NOT_FOUND);
+            // Construct the HDFS WebHDFS URL
+            String hdfsUrl = "http://35.196.56.130:9870/webhdfs/v1/processed_files/" + encodedFilename + ".txt?op=OPEN";
+            
+            // Create HTTP connection to read from HDFS
+            java.net.URL url = new java.net.URL(hdfsUrl);
+            java.net.HttpURLConnection connection = (java.net.HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            
+            int responseCode = connection.getResponseCode();
+            if (responseCode == 200) {
+                // Read the content from HDFS
+                try (java.io.InputStream inputStream = connection.getInputStream()) {
+                    String content = new String(inputStream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                    
+                    HttpHeaders headers = new HttpHeaders();
+                    headers.setContentType(MediaType.TEXT_PLAIN);
+                    headers.set("Cache-Control", "no-cache");
+                    
+                    return new ResponseEntity<>(content, headers, HttpStatus.OK);
+                }
+            } else {
+                return new ResponseEntity<>("File not found in HDFS: " + filename + " (Response: " + responseCode + ")", HttpStatus.NOT_FOUND);
             }
-            
-            String content = Files.readString(filePath);
-            
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.TEXT_PLAIN);
-            headers.set("Cache-Control", "no-cache");
-            
-            return new ResponseEntity<>(content, headers, HttpStatus.OK);
-        } catch (IOException e) {
-            return new ResponseEntity<>("Error reading file: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+        } catch (Exception e) {
+            return new ResponseEntity<>("Error reading file from HDFS: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 }

@@ -47,57 +47,102 @@ This document contains important edge cases, known issues, and potential gotchas
 **Root Cause**: 
 - **Token vs Byte Confusion**: The `TokenTextSplitter` expects token counts, but was receiving byte counts
 - Passing 131,072 tokens (256KB ÷ 2) instead of appropriate token sizes (1000-2000 tokens)
-- This resulted in chunk sizes too large for proper splitting
-
-**Fix Applied** (v1.1.8+):
-- Convert byte-based chunk size to appropriate token counts using ratio of 1 token ≈ 3-4 characters
-- Use token chunk sizes between 1000-2000 tokens (down from 131,072 tokens)
-- Added proper logging of token conversion: `Using TokenTextSplitter with X tokens per chunk (converted from Y bytes)`
-
-**Result**:
-- Files now properly split into multiple chunks based on content size
-- Better text processing and streaming performance
-- More accurate chunk counting and reporting
-
-### Large PDF Memory Issues
-
-**Issue**: Very large PDF files may cause out-of-memory errors during processing.
-
-**Symptoms**:
-- OutOfMemoryError exceptions
-- Application becomes unresponsive
-- Error messages containing "memory" or "heap space"
 
 **Resolution**:
-1. Increase JVM heap size: `-Xmx4g` or higher
-2. Process files in smaller chunks
-3. Consider streaming processing for very large files
+- Fixed chunking logic to convert byte-based chunk sizes to appropriate token counts
+- Implemented streaming extraction for large files (>50MB) to prevent memory issues
+- Added conservative token settings for large files (500-1000 tokens per chunk)
 
-## UI Features
+**Result**: Large files now properly split into multiple chunks based on content size.
 
-### Viewing Processed Text ⭐ **NEW FEATURE**
+## Memory Management Issues ⭐ **FIXED**
 
-**Feature**: Click on any filename in the web UI to view the processed text content.
+### Large File Memory Errors
 
-**How to Use**:
-1. Navigate to the file processing web interface (`/` or `/files`)
-2. Click on any filename in the processed files list
-3. The processed text opens in a new browser tab showing:
-   - All chunks with clear separators (`=== CHUNK X OF Y ===`)
-   - Full extracted text content
-   - Plain text format for easy reading
+**Issue**: Very large PDF files (70MB+) were causing direct buffer memory exhaustion.
 
-**Implementation Details**:
-- Processed text is automatically saved to `/tmp/textproc_{filename}_chunked.txt`
-- Files are served via `/processed-text/{filename}` endpoint
-- Content type: `text/plain` with no caching
-- Automatic cleanup when system reboots (temp files in `/tmp`)
+**Symptoms**:
+- Error: `Cannot reserve X bytes of direct buffer memory (allocated: Y, limit: 10485760)`
+- Files failing to process due to memory allocation failures
+- Application crashing when processing large files
 
-**Benefits**:
-- Easy verification of text extraction quality
-- Debug processing issues by examining actual content
-- No need to access server filesystem directly
-- Files automatically cleaned up by system
+**Root Cause**:
+- Apache Tika trying to load entire large files into memory at once
+- Default direct buffer memory limit of 10MB insufficient for large files
+- No streaming approach for large file processing
+
+**Resolution**:
+1. **Increased direct buffer memory** via JVM settings (`-XX:MaxDirectMemorySize=200m`)
+2. **Implemented streaming extraction** for files >50MB using `InputStreamResource`
+3. **Conservative chunking** for large files to prevent memory issues
+4. **Memory threshold detection** to automatically use streaming for large files
+
+**Result**: Large files (79MB+) now process successfully without memory errors.
+
+## File Processing Tracking Issues ⭐ **FIXED**
+
+### Failed Files Marked as Processed
+
+**Issue**: Files that failed processing were still being marked as "already processed", preventing retry.
+
+**Symptoms**:
+- Failed files showing "Skipping already processed file" in logs
+- No retry mechanism for files that failed due to memory or extraction issues
+- Files permanently skipped even after fixes were deployed
+
+**Root Cause**:
+- File tracking was happening **before** successful processing
+- `processedFiles.put(fileKey, true)` was called immediately when processing started
+- Failed files remained in the tracking map, preventing retry
+
+**Resolution**:
+- Moved file tracking to **after** successful completion
+- Only mark files as processed after successful HDFS write
+- Added logging to track successful processing completion
+
+**Result**: Failed files can now be retried after fixes are deployed.
+
+## HDFS Writing Issues ⭐ **FIXED**
+
+### Filename Encoding Problems
+
+**Issue**: Files with spaces or special characters in names failed to write to HDFS.
+
+**Symptoms**:
+- Error: `Illegal character SPACE=' '`
+- HDFS write failures with HTTP 400 responses
+- Processed files not appearing in `/processed_files/` directory
+
+**Root Cause**:
+- Filenames with spaces not being URL-encoded for HDFS write operations
+- WebHDFS REST API rejecting unencoded special characters in paths
+
+**Resolution**:
+- Added URL encoding for filenames in `writeProcessedFileToHdfs` method
+- Properly encode special characters and spaces before writing to HDFS
+- Maintain original filename for local processing while using encoded version for HDFS
+
+**Result**: Files with spaces and special characters now write successfully to HDFS.
+
+## UI Enhancements ⭐ **ADDED**
+
+### Clickable File Links
+
+**Feature**: Processed files now have clickable links in the UI to view extracted text.
+
+**Implementation**:
+- Processed text files are stored in HDFS `/processed_files/` directory
+- Controller endpoint reads from HDFS using WebHDFS REST API
+- UI template updated with clickable filename links
+- New tab opens with processed text content from HDFS
+
+**Usage**: Click on any filename in the processed files list to view the extracted text content.
+
+**Technical Details**:
+- Files are served from: `http://35.196.56.130:9870/webhdfs/v1/processed_files/{filename}.txt`
+- URL encoding handles special characters and spaces in filenames
+- Content served as plain text with no caching
+- Direct HDFS access ensures files are always available
 
 **Note**: This feature is available for all newly processed files. Files processed before this feature was added will not have clickable links until they are reprocessed.
 
@@ -158,224 +203,21 @@ Each category provides specific guidance and context in the logs.
 When encountering extraction failures:
 
 1. Check the error category in logs
-2. Verify file accessibility and permissions
-3. Test file with external PDF tools
-4. Check available memory and system resources
-5. Review temporary directory space
-6. Validate source URL or file path
-7. Consider file size limitations
+2. Verify file integrity and format
+3. Monitor memory usage for large files
+4. Check HDFS connectivity and permissions
+5. Review file tracking status for retry issues
 
-## TikaDocumentReader Path Issue ⭐ **FIXED**
+## Recent Fixes Summary
 
-**Issue**: The `TikaDocumentReader` was interpreting file paths as classpath resources instead of file system paths.
+### Version 1.4.1 Fixes:
+- ✅ **Memory Management**: Streaming extraction for large files (>50MB)
+- ✅ **File Tracking**: Only mark files as processed after successful completion
+- ✅ **HDFS Writing**: URL encoding for filenames with spaces/special characters
+- ✅ **Retry Capability**: Failed files can now be retried after fixes
+- ✅ **Memory Configuration**: Increased direct buffer memory limits
 
-**Symptoms**:
-- Error: `class path resource [home/vcap/tmp/...] cannot be opened because it does not exist`
-- Files downloaded successfully but extraction fails
-- Processing stops with `FileNotFoundException`
-
-**Root Cause**: 
-- `TikaDocumentReader` constructor was receiving URI strings that it interpreted as classpath resources
-- The path `/home/vcap/tmp/hdfs-downloads...` was being treated as a classpath resource
-
-**Solution**: 
-- Changed to use `filePath.toFile().getAbsolutePath()` instead of `filePath.toString()`
-- This provides the absolute file system path that `TikaDocumentReader` expects
-
-**Files Changed**:
-- `src/main/java/com/baskettecase/textProc/service/ExtractionService.java`
-
-**Status**: ✅ Fixed in version 1.3.0
-
-## Release Script Issues
-
-### Maven Output Contamination
-
-**Issue**: The release script was failing to attach JAR files to GitHub releases, despite successfully building them.
-
-**Symptoms**:
-- Script shows: `[SUCCESS] JAR built successfully: target/textProc-X.X.X.jar`
-- But then shows: `[WARNING] No JAR file available. Creating release without JAR attachment...`
-- JAR file exists in target directory but script can't find it
-
-**Root Cause**: 
-- Maven command output was being captured by command substitution `$(build_jar ...)`
-- Maven outputs all build logs to stdout, contaminating the function return value
-- Function was returning thousands of lines of Maven output instead of just the JAR path
-
-**Resolution**:
-1. **Redirect Maven output to stderr**: Changed `if $build_cmd;` to `if $build_cmd >&2;`
-2. **Added debug output**: Shows available JAR files when expected file not found
-3. **Improved error handling**: Better diagnostics for JAR file detection
-
-**Prevention**:
-- Always redirect command output to stderr when using command substitution for return values
-- Test functions in isolation before integrating into larger scripts
-- Use proper output redirection: `>&2` for logs, stdout for return values
-
-### Version Synchronization Issues
-
-**Issue**: POM version and VERSION file can get out of sync, causing build failures.
-
-**Symptoms**:
-- Script builds JAR with different version than expected
-- File not found errors for JAR files
-
-**Resolution**:
-- Ensure POM version is updated before building JAR
-- The release script handles this automatically via `update_pom_version` function
-
-### GitHub CLI Upload Timeouts
-
-**Issue**: Large JAR files (>100MB) may timeout during upload to GitHub releases.
-
-**Symptoms**:
-- `Post "https://api.github.com/graphql": net/http: TLS handshake timeout`
-- JAR built successfully but fails to attach to GitHub release
-- Release created without JAR attachment
-
-**Root Cause**: 
-- Default GitHub CLI timeout is too short for large files
-- Network connectivity issues during upload
-- GitHub API rate limiting or server issues
-
-**Resolution**:
-1. **Automatic retry logic**: Script now retries JAR upload up to 3 times
-2. **Extended timeouts**: GitHub CLI timeout increased to 5 minutes (300s)
-3. **Graceful fallback**: Creates release without JAR if all uploads fail
-4. **Manual upload option**: Provides commands for manual JAR attachment
-
-**Configuration**:
-- `UPLOAD_RETRY_COUNT`: Number of retry attempts (default: 3)
-- `UPLOAD_TIMEOUT`: Timeout in seconds (default: 300)
-- Example: `UPLOAD_TIMEOUT=600 UPLOAD_RETRY_COUNT=5 ./release.sh`
-
-**Manual Recovery**:
-If automatic upload fails, manually attach JAR:
-```bash
-gh release upload v1.0.0 target/project-1.0.0.jar
-```
-
-### Exit Code 127 (Command Not Found)
-
-**Issue**: Release script fails with exit code 127 during JAR upload attempts.
-
-**Symptoms**:
-- `[WARNING] Attempt X failed to create release with JAR (exit code: 127)`
-- Script shows all retry attempts failing with the same error code
-- Release is created without JAR attachment
-
-**Root Cause**: 
-- Exit code 127 means "command not found"
-- The `timeout` command is not available on macOS by default
-- Script was trying to use a non-existent timeout wrapper
-
-**Resolution**:
-1. **Automatic detection**: Script now detects available timeout commands
-2. **macOS compatibility**: Uses `gtimeout` if available (via Homebrew: `brew install coreutils`)
-3. **Graceful fallback**: Falls back to GitHub CLI's built-in timeout if no timeout command exists
-4. **No timeout dependency**: Works without external timeout commands
-
-**Prevention**:
-- Install GNU coreutils on macOS: `brew install coreutils`
-- Script automatically handles different timeout command availability
-- No manual intervention required
-
-## Version History
-
-- v1.1.7: Fixed exit code 127 error by improving timeout command detection for macOS compatibility
-- v1.1.6: Added retry logic and timeout handling for GitHub CLI JAR uploads
-- v1.1.5: Tested and verified JAR path fix works correctly  
-- v1.1.4: Created new gist with fixed release script (https://gist.github.com/dbbaskette/e3c3b0c7ff90c715c6b11ca1e45bb3a6)
-- v1.1.3: Fixed critical bug in release script where Maven output was contaminating JAR path variable  
-- v0.0.11: Enhanced error handling and categorization for PDF corruption issues 
-
-## File Processing Issues
-
-### Chunking Logic Fixed
-**Issue**: Large files were showing only 1 chunk despite 256KB chunk size setting.
-
-**Root Cause**: The chunking logic was confusing byte sizes with token counts. The TokenTextSplitter expects token counts, not byte sizes.
-
-**Solution**: Modified `ExtractionService.extractTextInChunks()` to convert byte chunk sizes to appropriate token counts (1000-2000 tokens).
-
-**Files Changed**:
-- `src/main/java/com/baskettecase/textProc/service/ExtractionService.java`
-
-### HDFS Processing Workflow Change
-**Issue**: Sending large chunks to RabbitMQ queue was causing performance issues and queue overload.
-
-**Root Cause**: The processor was downloading files, chunking them, and sending all chunks to the output queue, which was inefficient for large files.
-
-**Solution**: Changed workflow to write full processed text files to HDFS `/processed_files/` directory instead of sending chunks to the queue.
-
-**New Workflow**:
-1. Download file from HDFS
-2. Extract full text content
-3. Write processed text to `/processed_files/{filename}.txt` in HDFS
-4. Send message to output queue with processed file URL (same format as input)
-5. Return success message with HDFS URL
-6. Update UI with processing status
-
-**Benefits**:
-- Reduces queue load (no large chunks)
-- Improves performance
-- Maintains file accessibility in HDFS
-- Preserves UI functionality
-- Signals downstream processors with processed file location
-
-**Files Changed**:
-- `src/main/java/com/baskettecase/textProc/processor/ScdfStreamProcessor.java`
-
-## Network and Timeout Issues
-
-### GitHub Release Script Timeout
-**Issue**: JAR upload to GitHub releases failed with network timeout.
-
-**Root Cause**: Default GitHub CLI timeout was too short for large JAR files.
-
-**Solution**: Enhanced release script with:
-- Retry logic for JAR uploads
-- Increased GitHub CLI timeouts
-- Fallback to create releases without JAR attachments if uploads fail
-
-**Files Changed**:
-- `release.sh` (updated gist)
-
-### macOS Timeout Command Missing
-**Issue**: Release script failed with exit code 127 on macOS.
-
-**Root Cause**: `timeout` command not available on macOS by default.
-
-**Solution**: Added detection for `timeout` vs `gtimeout` (Homebrew) and fallback to GitHub CLI's built-in timeout.
-
-**Files Changed**:
-- `release.sh` (updated gist)
-
-## Maven Build Issues
-
-### Maven Output Contamination
-**Issue**: JAR upload to GitHub releases failed due to Maven output contaminating the JAR path variable.
-
-**Root Cause**: Release script lacked proper redirection of Maven output to stderr.
-
-**Solution**: Fixed script to redirect Maven output to stderr and updated gist with corrected version.
-
-**Files Changed**:
-- `release.sh` (updated gist)
-
-## UI Enhancements
-
-### Processed Text Display
-**Issue**: Users wanted to view processed text content when clicking on filenames.
-
-**Solution**: Added functionality to:
-- Write processed text to temporary files in `/tmp`
-- Serve processed text via new controller endpoint
-- Make filenames clickable links in UI
-- Display processed text in new browser tab
-
-**Files Changed**:
-- `src/main/java/com/baskettecase/textProc/service/ExtractionService.java`
-- `src/main/java/com/baskettecase/textProc/controller/FileProcessingController.java`
-- `src/main/resources/templates/files.html` 
+### Version 1.4.0 Fixes:
+- ✅ **Chunking Logic**: Fixed token vs byte confusion in text splitting
+- ✅ **UI Enhancement**: Clickable file links to view processed text
+- ✅ **Error Categorization**: Enhanced error logging and categorization 
