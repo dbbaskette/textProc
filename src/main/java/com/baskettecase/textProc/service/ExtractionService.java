@@ -7,6 +7,8 @@ import org.springframework.ai.document.DocumentReader;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -30,6 +32,7 @@ import java.util.stream.Stream;
 public class ExtractionService {
 
     private static final Logger logger = LoggerFactory.getLogger(ExtractionService.class);
+    private static final long LARGE_FILE_THRESHOLD = 50 * 1024 * 1024; // 50MB threshold for streaming
 
     /**
      * Extracts text from a file in chunks for streaming.
@@ -54,10 +57,19 @@ public class ExtractionService {
             logger.info("Starting text extraction from file: {} (size: {} bytes, {} MB)", 
                       filePath, fileSize, String.format("%.2f", fileSize / (1024.0 * 1024.0)));
             
+            // For large files, use streaming approach to avoid memory issues
+            if (fileSize > LARGE_FILE_THRESHOLD) {
+                logger.info("File is large ({} MB), using streaming extraction", String.format("%.2f", fileSize / (1024.0 * 1024.0)));
+                return extractTextInChunksStreaming(filePath, chunkSize);
+            }
+            
             // Use Spring AI's TikaDocumentReader to read the document with file path
             logger.debug("Reading document from file path: {}", filePath);
             
-            DocumentReader reader = new TikaDocumentReader(new FileSystemResource(filePath.toFile()));
+            // Read the file into a byte array and use ByteArrayResource
+            byte[] fileBytes = Files.readAllBytes(filePath);
+            ByteArrayResource resource = new ByteArrayResource(fileBytes);
+            DocumentReader reader = new TikaDocumentReader(resource);
             List<Document> documents = reader.get();
             
             if (documents.isEmpty()) {
@@ -132,6 +144,72 @@ public class ExtractionService {
     }
     
     /**
+     * Extracts text from large files using streaming approach to avoid memory issues.
+     * Processes the file in smaller chunks to prevent OutOfMemoryError.
+     *
+     * @param filePath The path to the file to extract text from
+     * @param chunkSize The target size for each text chunk in tokens
+     * @return A stream of text chunks
+     */
+    private Stream<String> extractTextInChunksStreaming(Path filePath, int chunkSize) {
+        try {
+            logger.info("Using streaming extraction for large file: {}", filePath);
+            
+            // Use InputStreamResource to avoid loading entire file into memory
+            try (InputStream inputStream = Files.newInputStream(filePath)) {
+                InputStreamResource resource = new InputStreamResource(inputStream);
+                DocumentReader reader = new TikaDocumentReader(resource);
+                List<Document> documents = reader.get();
+                
+                if (documents.isEmpty()) {
+                    logger.warn("No content extracted from the large document");
+                    return Stream.empty();
+                }
+                
+                logger.info("Successfully extracted {} pages from large document", documents.size());
+                
+                // Configure the splitter with conservative settings for large files
+                int tokenChunkSize = Math.max(500, Math.min(1000, chunkSize / 8)); // Smaller chunks for large files
+                int minChunkSize = Math.max(50, tokenChunkSize / 10);
+                int minChunkLengthToEmbed = Math.max(10, tokenChunkSize / 50);
+                
+                logger.info("Using conservative TokenTextSplitter for large file: {} tokens per chunk", tokenChunkSize);
+                
+                TokenTextSplitter splitter = new TokenTextSplitter(
+                    tokenChunkSize,
+                    minChunkSize,
+                    minChunkLengthToEmbed,
+                    500, // Limit chunks for large files
+                    true
+                );
+                
+                // Process each page separately
+                List<Document> allChunks = new ArrayList<>();
+                int pageNum = 0;
+                
+                for (Document doc : documents) {
+                    String pageText = doc.getText();
+                    if (pageText != null && !pageText.trim().isEmpty()) {
+                        List<Document> pageChunks = splitter.apply(List.of(doc));
+                        allChunks.addAll(pageChunks);
+                        logger.info("Large file - Page {} split into {} chunks", pageNum, pageChunks.size());
+                    }
+                    pageNum++;
+                }
+                
+                logger.info("Large file split into {} total chunks", allChunks.size());
+                
+                return allChunks.stream()
+                    .map(Document::getText)
+                    .filter(text -> text != null && !text.trim().isEmpty());
+            }
+        } catch (Exception e) {
+            logger.error("Error during streaming extraction of large file: {}", filePath, e);
+            return Stream.empty();
+        }
+    }
+    
+    /**
      * Extracts text from an input stream in chunks using Spring AI's TikaDocumentReader and TokenTextSplitter.
      *
      * @param inputStream The input stream to extract text from
@@ -177,7 +255,18 @@ public class ExtractionService {
     public String extractTextFromFile(Path filePath) throws IOException {
         logger.info("Extracting text from file: {}", filePath);
         try {
-            DocumentReader reader = new TikaDocumentReader(new FileSystemResource(filePath.toFile()));
+            long fileSize = Files.size(filePath);
+            
+            // For large files, use streaming approach
+            if (fileSize > LARGE_FILE_THRESHOLD) {
+                logger.info("File is large ({} MB), using streaming extraction", String.format("%.2f", fileSize / (1024.0 * 1024.0)));
+                return extractTextFromFileStreaming(filePath);
+            }
+            
+            // Read the file into a byte array and use ByteArrayResource
+            byte[] fileBytes = Files.readAllBytes(filePath);
+            ByteArrayResource resource = new ByteArrayResource(fileBytes);
+            DocumentReader reader = new TikaDocumentReader(resource);
             List<Document> documents = reader.get();
             
             if (documents.isEmpty()) {
@@ -193,6 +282,38 @@ public class ExtractionService {
             // Handle the same error types but return empty string instead of stream
             handleExtractionError(filePath, e);
             return ""; // Return empty string for graceful degradation
+        }
+    }
+    
+    /**
+     * Extracts all text from large files using streaming approach to avoid memory issues.
+     *
+     * @param filePath The path to the file to extract text from
+     * @return The extracted text content
+     * @throws IOException If an I/O error occurs
+     */
+    private String extractTextFromFileStreaming(Path filePath) throws IOException {
+        logger.info("Using streaming extraction for large file: {}", filePath);
+        
+        try (InputStream inputStream = Files.newInputStream(filePath)) {
+            InputStreamResource resource = new InputStreamResource(inputStream);
+            DocumentReader reader = new TikaDocumentReader(resource);
+            List<Document> documents = reader.get();
+            
+            if (documents.isEmpty()) {
+                logger.warn("No content extracted from the large document");
+                return "";
+            }
+            
+            logger.info("Successfully extracted {} pages from large document", documents.size());
+            
+            // Combine all document pages into a single string
+            return documents.stream()
+                .map(Document::getText)
+                .reduce("", (a, b) -> a + "\n\n" + b);
+        } catch (Exception e) {
+            logger.error("Error during streaming extraction of large file: {}", filePath, e);
+            return "";
         }
     }
     
