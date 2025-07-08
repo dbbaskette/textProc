@@ -112,6 +112,18 @@ This document tracks issues encountered during development and their solutions.
 
 **Verification**: Check logs for "using streaming extraction" messages
 
+### Problem: Excessive Log Volume
+**Issue**: Application generating too many log entries, hitting Cloud Foundry limits
+
+**Root Cause**: DEBUG level logging and verbose diagnostic messages
+
+**Solution**: 
+- Reduced default logging level from DEBUG to INFO
+- Moved diagnostic messages to DEBUG level
+- Reduced verbose message logging
+
+**Verification**: Check logs for reduced volume and no log limit warnings
+
 ### Problem: Memory Usage High
 **Issue**: Application using too much memory
 
@@ -177,6 +189,12 @@ This document tracks issues encountered during development and their solutions.
 - **Heap Size**: 2GB max, 1GB initial (configurable via `JAVA_OPTS`)
 - **Default**: 10MB direct buffer, 1GB heap (if not configured)
 
+### Logging Configuration
+- **Default Level**: INFO (reduced from DEBUG to minimize log volume)
+- **Diagnostic Logging**: DEBUG level for detailed processing information
+- **Error Logging**: ERROR level for all error conditions
+- **Performance**: Reduced verbose logging to prevent log limits
+
 ### File Processing Configuration
 - **Chunk Size**: 8KB (configurable)
 - **Max File Size**: 100MB (configurable)
@@ -192,12 +210,16 @@ This document tracks issues encountered during development and their solutions.
 6. **Test with different file sizes** to ensure proper memory allocation
 7. **Monitor HDFS connectivity** and file permissions
 8. **Use configurable properties** instead of hardcoded values
+9. **Monitor log volume** and adjust logging levels as needed
+10. **Use DEBUG level sparingly** to avoid hitting log limits in production
 
 ## Troubleshooting Checklist
 
 - [ ] Check JVM memory settings in startup logs
 - [ ] Verify HDFS connectivity and file permissions
 - [ ] Monitor memory usage in CF app metrics
+- [ ] Check log volume and adjust logging levels if needed
+- [ ] Monitor for log limit warnings in Cloud Foundry
 - [ ] Check for memory errors in application logs
 - [ ] Verify file processing status in logs
 - [ ] Test UI functionality and auto-refresh

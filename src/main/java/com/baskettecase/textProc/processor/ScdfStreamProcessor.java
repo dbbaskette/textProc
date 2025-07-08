@@ -447,7 +447,7 @@ public class ScdfStreamProcessor {
                             // Write processed text to temp file for UI display
                             try {
                                 Path tempTextFile = extractionService.writeExtractedTextToTempFile(filename, processedText);
-                                logger.info("Saved processed text for UI display: {}", tempTextFile);
+                                logger.debug("Saved processed text for UI display: {}", tempTextFile);
                             } catch (Exception e) {
                                 logger.warn("Failed to write processed text to temp file for {}: {}", filename, e.getMessage());
                             }
@@ -462,7 +462,7 @@ public class ScdfStreamProcessor {
                             
                             // Create a message with the same format pointing to the processed file
                             String processedMessage = createProcessedFileMessage(processedFileUrl, root);
-                            logger.info("Sending processed file message to queue: {}", processedMessage);
+                            logger.debug("Sending processed file message to queue: {}", processedMessage);
                             
                             // Send the processed file message to the output queue
                             // Use the standard SCDF output binding name

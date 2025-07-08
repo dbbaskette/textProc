@@ -84,9 +84,9 @@ public class ExtractionService {
             for (Document doc : documents) {
                 String pageText = doc.getText();
                 int len = (pageText != null) ? pageText.length() : 0;
-                logger.info("[DIAG] Page {} extracted text length: {}", pageNum, len);
+                logger.debug("[DIAG] Page {} extracted text length: {}", pageNum, len);
                 if (pageText != null && !pageText.isEmpty()) {
-                    logger.info("[DIAG] Page {} first 300 chars: {}", pageNum, pageText.substring(0, Math.min(300, pageText.length())).replaceAll("\n", " "));
+                    logger.debug("[DIAG] Page {} first 300 chars: {}", pageNum, pageText.substring(0, Math.min(300, pageText.length())).replaceAll("\n", " "));
                 }
                 pageNum++;
             }
@@ -101,7 +101,7 @@ public class ExtractionService {
             int minChunkSize = Math.max(100, tokenChunkSize / 10); // 10% of chunk size
             int minChunkLengthToEmbed = Math.max(20, tokenChunkSize / 50); // 2% of chunk size
             
-            logger.info("[DIAG] Using TokenTextSplitter with {} tokens per chunk (converted from {} bytes)", 
+            logger.debug("[DIAG] Using TokenTextSplitter with {} tokens per chunk (converted from {} bytes)", 
                        tokenChunkSize, chunkSize);
             
             TokenTextSplitter splitter = new TokenTextSplitter(
@@ -120,18 +120,18 @@ public class ExtractionService {
                     // Split each page's content into chunks
                     List<Document> pageChunks = splitter.apply(List.of(doc));
                     allChunks.addAll(pageChunks);
-                    logger.info("[DIAG] Page {} split into {} chunks", pageNum, pageChunks.size());
+                    logger.debug("[DIAG] Page {} split into {} chunks", pageNum, pageChunks.size());
                     for (int i = 0; i < pageChunks.size(); i++) {
                         String chunkText = pageChunks.get(i).getText();
                         int chunkLen = (chunkText != null) ? chunkText.length() : 0;
-                        logger.info("[DIAG] Page {} Chunk {} length: {} | First 150 chars: {}", pageNum, i, chunkLen, (chunkText != null ? chunkText.substring(0, Math.min(150, chunkText.length())).replaceAll("\n", " ") : ""));
+                        logger.debug("[DIAG] Page {} Chunk {} length: {} | First 150 chars: {}", pageNum, i, chunkLen, (chunkText != null ? chunkText.substring(0, Math.min(150, chunkText.length())).replaceAll("\n", " ") : ""));
                     }
                 }
                 pageNum++;
             }
             
             logger.debug("Document split into {} total chunks across all pages", allChunks.size());
-            logger.info("[DIAG] Total chunks after splitting: {}", allChunks.size());
+            logger.debug("[DIAG] Total chunks after splitting: {}", allChunks.size());
             
             // Return the text content of all chunks
             return allChunks.stream()

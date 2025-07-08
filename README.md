@@ -94,9 +94,9 @@ app.processor.standalone.processed-directory=./data/processed_files
 ```json
 {
   "type": "HDFS",
-  "url": "http://namenode:50070/webhdfs/v1/input/document.pdf",
-  "inputStream": "file-input",
-  "outputStream": "text-output"
+  "url": "http://35.196.56.130:9870/webhdfs/v1/documents/document.pdf",
+  "inputStream": "hdfswatcher-textproc",
+  "outputStream": "textproc-embedproc"
 }
 ```
 
@@ -104,11 +104,11 @@ app.processor.standalone.processed-directory=./data/processed_files
 ```json
 {
   "type": "HDFS",
-  "url": "http://namenode:50070/webhdfs/v1/processed_files/document.pdf.txt",
-  "inputStream": "file-input", 
-  "outputStream": "text-output",
+  "url": "http://35.196.56.130:9870/webhdfs/v1/processed_files/document.pdf.txt",
+  "inputStream": "hdfswatcher-textproc", 
+  "outputStream": "textproc-embedproc",
   "processed": true,
-  "originalFile": "http://namenode:50070/webhdfs/v1/input/document.pdf"
+  "originalFile": "http://35.196.56.130:9870/webhdfs/v1/documents/document.pdf"
 }
 ```
 
