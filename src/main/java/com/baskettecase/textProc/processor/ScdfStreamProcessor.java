@@ -465,7 +465,8 @@ public class ScdfStreamProcessor {
                             logger.info("Sending processed file message to queue: {}", processedMessage);
                             
                             // Send the processed file message to the output queue
-                            boolean sent = streamBridge.send("output-out-0", 
+                            // Use the standard SCDF output binding name
+                            boolean sent = streamBridge.send("textProc-out-0", 
                                 MessageBuilder.withPayload(processedMessage.getBytes(StandardCharsets.UTF_8))
                                     .copyHeaders(headers)
                                     .setHeader("originalFile", webhdfsUrl)
