@@ -17,3 +17,5 @@ build.sh
 
 # Logs
 *.log
+release.sh
+.release-exec

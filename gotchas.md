@@ -1,223 +1,205 @@
-# TextProc Gotchas and Edge Cases
+# Text Processing Application - Gotchas and Solutions
 
-This document contains important edge cases, known issues, and potential gotchas when using the TextProc application.
+This document tracks issues encountered during development and their solutions.
 
-## PDF Processing Issues
+## Memory Management Issues
 
-### Corrupted PDF Files
+### Problem: OutOfMemoryError with Large Files
+**Issue**: Large PDF files (>50MB) cause `OutOfMemoryError: Cannot reserve X bytes of direct buffer memory`
 
-**Issue**: The application may encounter corrupted or incomplete PDF files that cause extraction to fail.
+**Root Cause**: Default JVM direct buffer memory limit (10MB) is insufficient for large files
 
-**Symptoms**:
-- Error: `Missing root object specification in trailer`
-- Stack trace containing `TIKA-198: Illegal IOException from org.apache.tika.parser.pdf.PDFParser`
-- Log message: `No chunks were generated for file`
+**Solution**: 
+- Set JVM memory options in SCDF deployment properties:
+  ```
+  deployer.textProc.environment-variables=JAVA_OPTS=-XX:MaxDirectMemorySize=512m -Xmx2g -Xms1g
+  ```
+- Use streaming extraction for files >50MB
+- Monitor memory usage in application logs
 
-**Root Cause**: 
-- PDF file is corrupted, incomplete, or malformed
-- File was not completely downloaded from the source
-- Source file has structural issues in the PDF format
+**Verification**: Check logs for `JVM Memory Configuration` showing increased limits
 
-**Resolution**:
-1. **Verify file integrity**: Check if the file can be opened in a PDF viewer
-2. **Re-download**: If the file is from a remote source, try downloading it again
-3. **Check source**: Verify the original file source is not corrupted
-4. **Alternative tools**: Try processing the file with other PDF tools to confirm corruption
+## File Processing Issues
 
-**Application Behavior**:
-- The application gracefully handles corrupted PDFs
-- Error is logged with specific categorization (CORRUPTED PDF detected)
-- Processing continues with other files (no crash)
-- Returns empty result for the corrupted file
+### Problem: Files Not Appearing in Processed List
+**Issue**: Files processed but not showing in UI
 
-**Prevention**:
-- Implement file integrity checks before processing
-- Add checksums or file validation where possible
-- Monitor download processes for completeness
+**Root Cause**: In-memory tracking marks files as processed before completion
 
-### Text Chunking Issues ⭐ **FIXED**
+**Solution**: Modified tracking logic to mark files as processed only after successful completion
 
-**Issue**: All files were showing as "1 chunk" regardless of file size, even for very large PDFs.
+**Verification**: Check logs for "Successfully processed and tracked file" messages
 
-**Symptoms**:
-- Large files (81MB, 263MB) reporting only 1 chunk
-- Chunk size of 256KB but chunk count always 1
-- Files much larger than chunk size not being split properly
+### Problem: HDFS Writing Failures
+**Issue**: HTTP 400 errors when writing files to HDFS
 
-**Root Cause**: 
-- **Token vs Byte Confusion**: The `TokenTextSplitter` expects token counts, but was receiving byte counts
-- Passing 131,072 tokens (256KB ÷ 2) instead of appropriate token sizes (1000-2000 tokens)
+**Root Cause**: Spaces in filenames not URL-encoded
 
-**Resolution**:
-- Fixed chunking logic to convert byte-based chunk sizes to appropriate token counts
-- Implemented streaming extraction for large files (>50MB) to prevent memory issues
-- Added conservative token settings for large files (500-1000 tokens per chunk)
+**Solution**: URL-encode filenames before writing to HDFS
 
-**Result**: Large files now properly split into multiple chunks based on content size.
+**Verification**: Check logs for successful HDFS write operations
 
-## Memory Management Issues ⭐ **FIXED**
+### Problem: No Text Extracted from Some Files
+**Issue**: "No text was extracted" warnings for certain files
 
-### Large File Memory Errors
+**Root Cause**: Image-based PDFs or corrupted files
 
-**Issue**: Very large PDF files (70MB+) were causing direct buffer memory exhaustion.
+**Solution**: 
+- Files are still processed and tracked
+- Check if files contain actual text content
+- Consider OCR for image-based PDFs if needed
 
-**Symptoms**:
-- Error: `Cannot reserve X bytes of direct buffer memory (allocated: Y, limit: 10485760)`
-- Files failing to process due to memory allocation failures
-- Application crashing when processing large files
+**Verification**: Check logs for extraction success/failure messages
 
-**Root Cause**:
-- Apache Tika trying to load entire large files into memory at once
-- Default direct buffer memory limit of 10MB insufficient for large files
-- No streaming approach for large file processing
+## UI and Display Issues
 
-**Resolution**:
-1. **Increased direct buffer memory** via JVM settings (`-XX:MaxDirectMemorySize=200m`)
-2. **Implemented streaming extraction** for files >50MB using `InputStreamResource`
-3. **Conservative chunking** for large files to prevent memory issues
-4. **Memory threshold detection** to automatically use streaming for large files
+### Problem: UI Links Point to Local Files Instead of HDFS
+**Issue**: Processed text links point to local temp files
 
-**Result**: Large files (79MB+) now process successfully without memory errors.
+**Root Cause**: Controller serving from local temp files instead of HDFS
 
-## File Processing Tracking Issues ⭐ **FIXED**
+**Solution**: Updated controller to serve processed text directly from HDFS via WebHDFS REST API
 
-### Failed Files Marked as Processed
+**Verification**: Check that UI links work and display content from HDFS
 
-**Issue**: Files that failed processing were still being marked as "already processed", preventing retry.
+### Problem: HDFS URLs Hardcoded
+**Issue**: HDFS URLs hardcoded in controller
 
-**Symptoms**:
-- Failed files showing "Skipping already processed file" in logs
-- No retry mechanism for files that failed due to memory or extraction issues
-- Files permanently skipped even after fixes were deployed
+**Root Cause**: URLs not configurable through application properties
 
-**Root Cause**:
-- File tracking was happening **before** successful processing
-- `processedFiles.put(fileKey, true)` was called immediately when processing started
-- Failed files remained in the tracking map, preventing retry
+**Solution**: Made HDFS URLs configurable through application properties:
+  ```
+  app.hdfs.base-url=http://35.196.56.130:9870/webhdfs/v1
+  app.hdfs.processed-files-path=/processed_files
+  ```
 
-**Resolution**:
-- Moved file tracking to **after** successful completion
-- Only mark files as processed after successful HDFS write
-- Added logging to track successful processing completion
+**Verification**: URLs can be changed via application properties without code changes
 
-**Result**: Failed files can now be retried after fixes are deployed.
+## Configuration Issues
 
-## HDFS Writing Issues ⭐ **FIXED**
+### Problem: JVM Settings Not Applied
+**Issue**: JVM memory settings not taking effect in Cloud Foundry
 
-### Filename Encoding Problems
+**Root Cause**: Wrong environment variable name in SCDF deployment properties
 
-**Issue**: Files with spaces or special characters in names failed to write to HDFS.
+**Solution**: Use `JAVA_OPTS` instead of `java.opts`:
+  ```
+  deployer.textProc.environment-variables=JAVA_OPTS=-XX:MaxDirectMemorySize=512m -Xmx2g -Xms1g
+  ```
 
-**Symptoms**:
-- Error: `Illegal character SPACE=' '`
-- HDFS write failures with HTTP 400 responses
-- Processed files not appearing in `/processed_files/` directory
+**Verification**: Check startup logs for `JVM Memory Configuration` showing correct limits
 
-**Root Cause**:
-- Filenames with spaces not being URL-encoded for HDFS write operations
-- WebHDFS REST API rejecting unencoded special characters in paths
+### Problem: SCDF Deployment Properties Not Applied
+**Issue**: Deployment properties not reaching the application
 
-**Resolution**:
-- Added URL encoding for filenames in `writeProcessedFileToHdfs` method
-- Properly encode special characters and spaces before writing to HDFS
-- Maintain original filename for local processing while using encoded version for HDFS
+**Root Cause**: Properties not properly formatted or stream not redeployed
 
-**Result**: Files with spaces and special characters now write successfully to HDFS.
+**Solution**: 
+- Ensure correct property format
+- Redeploy stream after property changes
+- Verify environment variables in CF app
 
-## UI Enhancements ⭐ **ADDED**
+**Verification**: Check `cf env` output for applied environment variables
 
-### Clickable File Links
+## Performance Optimizations
 
-**Feature**: Processed files now have clickable links in the UI to view extracted text.
+### Problem: Large File Processing Slow
+**Issue**: Large files take too long to process
 
-**Implementation**:
-- Processed text files are stored in HDFS `/processed_files/` directory
-- Controller endpoint reads from HDFS using WebHDFS REST API
-- UI template updated with clickable filename links
-- New tab opens with processed text content from HDFS
+**Root Cause**: Loading entire file into memory
 
-**Usage**: Click on any filename in the processed files list to view the extracted text content.
+**Solution**: Implemented streaming extraction for files >50MB
 
-**Technical Details**:
-- Files are served from: `http://35.196.56.130:9870/webhdfs/v1/processed_files/{filename}.txt`
-- URL encoding handles special characters and spaces in filenames
-- Content served as plain text with no caching
-- Direct HDFS access ensures files are always available
+**Verification**: Check logs for "using streaming extraction" messages
 
-**Note**: This feature is available for all newly processed files. Files processed before this feature was added will not have clickable links until they are reprocessed.
+### Problem: Memory Usage High
+**Issue**: Application using too much memory
 
-## File Processing Edge Cases
+**Root Cause**: Insufficient memory allocation
 
-### URL Encoding Issues
+**Solution**: Increased heap and direct buffer memory allocation
 
-**Issue**: File names with special characters may cause URL encoding/decoding problems.
+**Verification**: Monitor memory usage in CF app metrics
 
-**Symptoms**:
-- Files with names like `[O'Reilly Technical Guide]` in URLs
-- URL decoding failures in logs
+## Release and Deployment Issues
 
-**Resolution**:
-- The application automatically handles URL decoding
-- Special characters are properly escaped in file URIs
+### Problem: Release Script Failures
+**Issue**: GitHub release creation failing
 
-### Temporary File Cleanup
+**Root Cause**: Network issues or GitHub CLI problems
 
-**Issue**: Temporary files may not be cleaned up if processing is interrupted.
+**Solution**: 
+- Added retry logic to release script
+- Improved error handling
+- Added timeout commands for compatibility
 
-**Prevention**:
-- Application uses try-with-resources and finally blocks
-- Temporary directories are cleaned up automatically
-- Failed processing still triggers cleanup
+**Verification**: Check release script output for success messages
 
-## Error Handling Improvements
+### Problem: JAR Upload Failures
+**Issue**: JAR files not uploading to GitHub releases
 
-### Enhanced Error Categorization
+**Root Cause**: File size or network issues
 
-The application now categorizes errors into specific types:
+**Solution**: 
+- Added file existence checks
+- Improved error messages
+- Added retry logic
 
-1. **CORRUPTED PDF**: PDF-specific corruption issues
-2. **TIKA PARSING ERROR**: General Tika parsing problems
-3. **FILE I/O ERROR**: File system or permission issues
-4. **MEMORY ERROR**: Out-of-memory conditions
-5. **UNKNOWN EXTRACTION ERROR**: Unexpected errors
+**Verification**: Check GitHub releases for uploaded JAR files
 
-Each category provides specific guidance and context in the logs.
+## UI Enhancement Issues
 
-### Graceful Degradation
+### Problem: Basic UI Not User-Friendly
+**Issue**: Simple HTML interface not providing good user experience
 
-- Failed file processing does not crash the application
-- Empty results are returned for failed extractions
-- Processing continues with remaining files
-- Detailed error logging helps with debugging
+**Root Cause**: Basic Bootstrap template without modern features
+
+**Solution**: Created modern dashboard with:
+- Real-time statistics cards
+- Auto-refresh functionality
+- Status distribution charts
+- Enhanced file display
+- Responsive design
+
+**Verification**: Check new dashboard features and functionality
+
+## Current Configuration
+
+### HDFS Configuration
+- **Base URL**: Configurable via `app.hdfs.base-url` property
+- **Processed Files Path**: Configurable via `app.hdfs.processed-files-path` property
+- **Default Values**: 
+  - Base URL: `http://35.196.56.130:9870/webhdfs/v1`
+  - Processed Files Path: `/processed_files`
+
+### Memory Configuration
+- **Direct Buffer Memory**: 512MB (configurable via `JAVA_OPTS`)
+- **Heap Size**: 2GB max, 1GB initial (configurable via `JAVA_OPTS`)
+- **Default**: 10MB direct buffer, 1GB heap (if not configured)
+
+### File Processing Configuration
+- **Chunk Size**: 8KB (configurable)
+- **Max File Size**: 100MB (configurable)
+- **Streaming Threshold**: 50MB (files larger than this use streaming)
 
 ## Best Practices
 
-1. **Monitor Logs**: Watch for specific error categories to identify systemic issues
-2. **File Validation**: Pre-validate files when possible
-3. **Resource Management**: Monitor memory usage with large files
-4. **Error Recovery**: Implement retry logic for transient failures
-5. **Source Verification**: Verify file sources and integrity
+1. **Always configure JVM memory settings** in SCDF deployment properties
+2. **Monitor application logs** for memory errors and processing status
+3. **Use streaming extraction** for files >50MB
+4. **Redeploy streams** after configuration changes
+5. **Verify environment variables** are applied correctly
+6. **Test with different file sizes** to ensure proper memory allocation
+7. **Monitor HDFS connectivity** and file permissions
+8. **Use configurable properties** instead of hardcoded values
 
 ## Troubleshooting Checklist
 
-When encountering extraction failures:
-
-1. Check the error category in logs
-2. Verify file integrity and format
-3. Monitor memory usage for large files
-4. Check HDFS connectivity and permissions
-5. Review file tracking status for retry issues
-
-## Recent Fixes Summary
-
-### Version 1.4.1 Fixes:
-- ✅ **Memory Management**: Streaming extraction for large files (>50MB)
-- ✅ **File Tracking**: Only mark files as processed after successful completion
-- ✅ **HDFS Writing**: URL encoding for filenames with spaces/special characters
-- ✅ **Retry Capability**: Failed files can now be retried after fixes
-- ✅ **Memory Configuration**: Increased direct buffer memory limits
-
-### Version 1.4.0 Fixes:
-- ✅ **Chunking Logic**: Fixed token vs byte confusion in text splitting
-- ✅ **UI Enhancement**: Clickable file links to view processed text
-- ✅ **Error Categorization**: Enhanced error logging and categorization 
+- [ ] Check JVM memory settings in startup logs
+- [ ] Verify HDFS connectivity and file permissions
+- [ ] Monitor memory usage in CF app metrics
+- [ ] Check for memory errors in application logs
+- [ ] Verify file processing status in logs
+- [ ] Test UI functionality and auto-refresh
+- [ ] Confirm configuration properties are applied
+- [ ] Check release script execution and GitHub uploads 
