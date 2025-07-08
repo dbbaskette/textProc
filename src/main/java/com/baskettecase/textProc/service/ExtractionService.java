@@ -267,17 +267,17 @@ public class ExtractionService {
             byte[] fileBytes = Files.readAllBytes(filePath);
             ByteArrayResource resource = new ByteArrayResource(fileBytes);
             DocumentReader reader = new TikaDocumentReader(resource);
-            List<Document> documents = reader.get();
-            
-            if (documents.isEmpty()) {
-                logger.warn("No content extracted from the document");
-                return "";
-            }
-            
-            // Combine all document pages into a single string
-            return documents.stream()
-                .map(Document::getText)
-                .reduce("", (a, b) -> a + "\n\n" + b);
+        List<Document> documents = reader.get();
+        
+        if (documents.isEmpty()) {
+            logger.warn("No content extracted from the document");
+            return "";
+        }
+        
+        // Combine all document pages into a single string
+        return documents.stream()
+            .map(Document::getText)
+            .reduce("", (a, b) -> a + "\n\n" + b);
         } catch (RuntimeException e) {
             // Handle the same error types but return empty string instead of stream
             handleExtractionError(filePath, e);

@@ -463,29 +463,13 @@ public class ScdfStreamProcessor {
                             // Create a message with the same format pointing to the processed file
                             String processedMessage = createProcessedFileMessage(processedFileUrl, root);
                             logger.debug("Sending processed file message to queue: {}", processedMessage);
-                            
-                            // Send the processed file message to the output queue
-                            // Use the standard SCDF output binding name
-                            boolean sent = streamBridge.send("textProc-out-0", 
-                                MessageBuilder.withPayload(processedMessage.getBytes(StandardCharsets.UTF_8))
+                                        
+                            // Return the JSON message using the preferred SCDF pattern
+                            // This sends the processed file information in JSON format
+                            return MessageBuilder.withPayload(processedMessage.getBytes(StandardCharsets.UTF_8))
                                     .copyHeaders(headers)
                                     .setHeader("originalFile", webhdfsUrl)
                                     .setHeader("processedFileUrl", processedFileUrl)
-                                    .setHeader("extractedTextLength", processedText.length())
-                                    .build());
-                                    
-                            if (!sent) {
-                                logger.error("Failed to send processed file message to output queue");
-                            } else {
-                                logger.debug("Successfully sent processed file message to output queue");
-                            }
-                            
-                            // Return a success message
-                            String successMessage = "Processed file written to HDFS: " + processedFileUrl;
-                            return MessageBuilder.withPayload(successMessage.getBytes(StandardCharsets.UTF_8))
-                                    .copyHeaders(headers)
-                                    .setHeader("processedFileUrl", processedFileUrl)
-                                    .setHeader("originalFile", webhdfsUrl)
                                     .setHeader("extractedTextLength", processedText.length())
                                     .build();
                             
