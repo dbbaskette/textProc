@@ -1,60 +1,46 @@
-# Text Processing Application - Gotchas and Solutions
+# Gotchas and Solutions
 
 This document tracks issues encountered during development and their solutions.
 
-## Memory Management Issues
+## RabbitMQ Connection Issues
 
-### Problem: OutOfMemoryError with Large Files
-**Issue**: Large PDF files (>50MB) cause `OutOfMemoryError: Cannot reserve X bytes of direct buffer memory`
+### Problem: RabbitMQ Connection Refused Locally
+**Issue**: Application fails to start locally with SCDF profile due to RabbitMQ connection errors
 
-**Root Cause**: Default JVM direct buffer memory limit (10MB) is insufficient for large files
-
-**Solution**: 
-- Set JVM memory options in SCDF deployment properties:
-  ```
-  deployer.textProc.environment-variables=JAVA_OPTS=-XX:MaxDirectMemorySize=512m -Xmx2g -Xms1g
-  ```
-- Use streaming extraction for files >50MB
-- Monitor memory usage in application logs
-
-**Verification**: Check logs for `JVM Memory Configuration` showing increased limits
-
-## File Processing Issues
-
-### Problem: Files Not Appearing in Processed List
-**Issue**: Files processed but not showing in UI
-
-**Root Cause**: In-memory tracking marks files as processed before completion
-
-**Solution**: Modified tracking logic to mark files as processed only after successful completion
-
-**Verification**: Check logs for "Successfully processed and tracked file" messages
-
-### Problem: HDFS Writing Failures
-**Issue**: HTTP 400 errors when writing files to HDFS
-
-**Root Cause**: Spaces in filenames not URL-encoded
-
-**Solution**: URL-encode filenames before writing to HDFS
-
-**Verification**: Check logs for successful HDFS write operations
-
-### Problem: No Text Extracted from Some Files
-**Issue**: "No text was extracted" warnings for certain files
-
-**Root Cause**: Image-based PDFs or corrupted files
+**Root Cause**: Application tries to connect to `localhost:5672` but no RabbitMQ server is running locally
 
 **Solution**: 
-- Files are still processed and tracked
-- Check if files contain actual text content
-- Consider OCR for image-based PDFs if needed
+- Added RabbitMQ configuration in `application-scdf.properties` with environment variable fallbacks
+- Created `LocalDevelopmentConfig` to provide warnings when running locally
+- Added connection timeout settings to prevent long startup delays
 
-**Verification**: Check logs for extraction success/failure messages
+**For Local Development**:
+1. **Option 1**: Use `standalone` profile (no RabbitMQ needed)
+   ```bash
+   mvn spring-boot:run -Dspring-boot.run.profiles=standalone
+   ```
 
-## UI and Display Issues
+2. **Option 2**: Start RabbitMQ locally
+   ```bash
+   # Using Docker
+   docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3.12-management
+   ```
 
-### Problem: UI Links Point to Local Files Instead of HDFS
-**Issue**: Processed text links point to local temp files
+3. **Option 3**: Run SCDF profile (web interface works, processing doesn't)
+   ```bash
+   mvn spring-boot:run -Dspring-boot.run.profiles=scdf
+   ```
+
+**For Cloud Foundry Deployment**: RabbitMQ connection is automatically configured via service binding
+
+**Verification**: 
+- Local development: Check startup logs for RabbitMQ warnings
+- Cloud Foundry: Check logs for successful RabbitMQ connection
+
+## UI Issues
+
+### Problem: Processed Text Not Displaying
+**Issue**: Clicking on processed files in UI shows empty content
 
 **Root Cause**: Controller serving from local temp files instead of HDFS
 
@@ -185,43 +171,18 @@ This document tracks issues encountered during development and their solutions.
   - Processed Files Path: `/processed_files`
 
 ### Memory Configuration
-- **Direct Buffer Memory**: 512MB (configurable via `JAVA_OPTS`)
-- **Heap Size**: 2GB max, 1GB initial (configurable via `JAVA_OPTS`)
-- **Default**: 10MB direct buffer, 1GB heap (if not configured)
+- **Heap Size**: 2GB maximum, 1GB minimum
+- **Direct Buffer Memory**: 512MB
+- **Cloud Foundry Memory**: 1GB allocated
 
-### Logging Configuration
-- **Default Level**: INFO (reduced from DEBUG to minimize log volume)
-- **Diagnostic Logging**: DEBUG level for detailed processing information
-- **Error Logging**: ERROR level for all error conditions
-- **Performance**: Reduced verbose logging to prevent log limits
+### RabbitMQ Configuration
+- **Local Development**: `localhost:5672` (with warnings)
+- **Cloud Foundry**: Auto-configured via service binding
+- **Connection Timeout**: 5 seconds
+- **Heartbeat**: 30 seconds
 
-### File Processing Configuration
-- **Chunk Size**: 8KB (configurable)
-- **Max File Size**: 100MB (configurable)
-- **Streaming Threshold**: 50MB (files larger than this use streaming)
-
-## Best Practices
-
-1. **Always configure JVM memory settings** in SCDF deployment properties
-2. **Monitor application logs** for memory errors and processing status
-3. **Use streaming extraction** for files >50MB
-4. **Redeploy streams** after configuration changes
-5. **Verify environment variables** are applied correctly
-6. **Test with different file sizes** to ensure proper memory allocation
-7. **Monitor HDFS connectivity** and file permissions
-8. **Use configurable properties** instead of hardcoded values
-9. **Monitor log volume** and adjust logging levels as needed
-10. **Use DEBUG level sparingly** to avoid hitting log limits in production
-
-## Troubleshooting Checklist
-
-- [ ] Check JVM memory settings in startup logs
-- [ ] Verify HDFS connectivity and file permissions
-- [ ] Monitor memory usage in CF app metrics
-- [ ] Check log volume and adjust logging levels if needed
-- [ ] Monitor for log limit warnings in Cloud Foundry
-- [ ] Check for memory errors in application logs
-- [ ] Verify file processing status in logs
-- [ ] Test UI functionality and auto-refresh
-- [ ] Confirm configuration properties are applied
-- [ ] Check release script execution and GitHub uploads 
+### Processing Controls
+- **Default State**: STOPPED (for demo control)
+- **Consumer Management**: Pause/resume RabbitMQ consumers
+- **Reset Functionality**: Clear processed files from HDFS
+- **UI Integration**: Real-time status display and controls 
