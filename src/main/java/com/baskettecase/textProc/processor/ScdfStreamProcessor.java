@@ -372,13 +372,7 @@ public class ScdfStreamProcessor {
             MessageHeaders headers = inputMsg.getHeaders();
         logger.debug("Received message: {}", payload);
         
-        // Check if processing is enabled
-        if (!processingStateService.isProcessingEnabled()) {
-            logger.info("Processing is currently disabled, skipping message");
-            return MessageBuilder.withPayload(new byte[0])
-                    .copyHeaders(inputMsg.getHeaders())
-                    .build();
-        }
+
         
         try {
             JsonNode root = objectMapper.readTree(payload);

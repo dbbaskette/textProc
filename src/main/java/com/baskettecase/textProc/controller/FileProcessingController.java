@@ -168,7 +168,8 @@ public class FileProcessingController {
         return Map.of(
             "status", "success",
             "message", "Processing started",
-            "processingState", processingStateService.getProcessingState()
+            "processingState", processingStateService.getProcessingState(),
+            "consumerStatus", processingStateService.getConsumerStatus()
         );
     }
     
@@ -183,7 +184,8 @@ public class FileProcessingController {
         return Map.of(
             "status", "success",
             "message", "Processing stopped",
-            "processingState", processingStateService.getProcessingState()
+            "processingState", processingStateService.getProcessingState(),
+            "consumerStatus", processingStateService.getConsumerStatus()
         );
     }
     
@@ -210,6 +212,7 @@ public class FileProcessingController {
             "status", "success",
             "message", "Reset completed",
             "processingState", processingStateService.getProcessingState(),
+            "consumerStatus", processingStateService.getConsumerStatus(),
             "hdfsCleared", hdfsCleared,
             "directoryRecreated", directoryRecreated
         );
@@ -224,7 +227,8 @@ public class FileProcessingController {
     public Map<String, Object> getProcessingState() {
         return Map.of(
             "processingState", processingStateService.getProcessingState(),
-            "isProcessingEnabled", processingStateService.isProcessingEnabled()
+            "isProcessingEnabled", processingStateService.isProcessingEnabled(),
+            "consumerStatus", processingStateService.getConsumerStatus()
         );
     }
 }

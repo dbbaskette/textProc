@@ -36,19 +36,22 @@ This application now includes processing controls to help manage demo timing and
 
 ### Backend Services
 - `ProcessingStateService`: Manages start/stop state using atomic boolean
+- `ConsumerLifecycleService`: Manages RabbitMQ consumer lifecycle (pause/resume)
 - `HdfsService`: Handles HDFS operations for reset functionality
 - REST endpoints: `/api/processing/start`, `/api/processing/stop`, `/api/processing/reset`
 
 ### Frontend Features
 - Real-time status display with color-coded badges
+- Consumer status display showing active/paused consumers
 - Confirmation dialog for reset operation
 - Toast notifications for operation feedback
 - Auto-refresh after reset operations
 
 ### SCDF Integration
-- The `ScdfStreamProcessor` checks processing state before processing files
-- When stopped, messages are received but ignored (empty response returned)
-- When started, normal processing continues
+- The `ConsumerLifecycleService` manages RabbitMQ consumer lifecycle
+- When stopped, message consumers are paused (no messages consumed from queue)
+- When started, message consumers are resumed and normal processing continues
+- Messages remain in the queue when processing is disabled
 
 ## Configuration
 

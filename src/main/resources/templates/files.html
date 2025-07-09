@@ -183,6 +183,8 @@
                                 <span class="badge" 
                                       th:class="${processingState == 'STARTED' ? 'bg-success' : 'bg-danger'}"
                                       th:text="${processingState}">STOPPED</span>
+                                <br>
+                                <small class="text-muted" id="consumerStatus">Checking consumer status...</small>
                             </div>
                             <div class="col-md-6">
                                 <div class="btn-group" role="group">
@@ -382,6 +384,12 @@
         setInterval(updateTime, 1000);
         updateTime();
         
+        // Update consumer status every 10 seconds
+        setInterval(updateConsumerStatus, 10000);
+        
+        // Initial consumer status update
+        updateConsumerStatus();
+        
         // Add CSS for spinning animation
         const style = document.createElement('style');
         style.textContent = `
@@ -401,6 +409,7 @@
                 .then(response => response.json())
                 .then(data => {
                     updateProcessingState(data.processingState);
+                    updateConsumerStatus();
                     showNotification('Processing started successfully', 'success');
                 })
                 .catch(error => {
@@ -414,6 +423,7 @@
                 .then(response => response.json())
                 .then(data => {
                     updateProcessingState(data.processingState);
+                    updateConsumerStatus();
                     showNotification('Processing stopped successfully', 'success');
                 })
                 .catch(error => {
@@ -445,6 +455,20 @@
                 statusBadge.textContent = state;
                 statusBadge.className = state === 'STARTED' ? 'badge bg-success' : 'badge bg-danger';
             }
+        }
+        
+        function updateConsumerStatus() {
+            fetch('/api/processing/state')
+                .then(response => response.json())
+                .then(data => {
+                    const consumerStatusElement = document.getElementById('consumerStatus');
+                    if (consumerStatusElement) {
+                        consumerStatusElement.textContent = data.consumerStatus || 'Unknown';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching consumer status:', error);
+                });
         }
         
         function showNotification(message, type) {
