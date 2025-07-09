@@ -57,6 +57,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=scdf
 - **Text Preview**: Click filenames to view extracted text content
 - **Processing Statistics**: File sizes, chunk counts, processing times
 - **Stream Information**: Input/output stream configuration
+- **Processing Controls**: Start/stop processing and reset functionality for demo management
 
 ## ⚙️ Configuration
 

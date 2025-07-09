@@ -4,6 +4,7 @@ import com.baskettecase.textProc.config.FileProcessingProperties;
 import com.baskettecase.textProc.model.FileProcessingInfo;
 import com.baskettecase.textProc.service.ExtractionService;
 import com.baskettecase.textProc.service.FileProcessingService;
+import com.baskettecase.textProc.service.ProcessingStateService;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -79,6 +80,7 @@ public class ScdfStreamProcessor {
     private final FileProcessingService fileProcessingService;
     @SuppressWarnings("unused")
     private final FileProcessingProperties fileProcessingProperties;
+    private final ProcessingStateService processingStateService;
     private MinioClient minioClient = null;
     private final Map<String, Boolean> processedFiles = new ConcurrentHashMap<>();
     private final StreamBridge streamBridge;
@@ -87,15 +89,17 @@ public class ScdfStreamProcessor {
     public ScdfStreamProcessor(ExtractionService extractionService, 
                              FileProcessingService fileProcessingService, 
                              FileProcessingProperties fileProcessingProperties,
+                             ProcessingStateService processingStateService,
                              StreamBridge streamBridge) {
         this.extractionService = extractionService;
         this.fileProcessingService = fileProcessingService;
         this.fileProcessingProperties = fileProcessingProperties;
+        this.processingStateService = processingStateService;
         this.streamBridge = streamBridge;
     }
 
     public ScdfStreamProcessor(ExtractionService extractionService, FileProcessingService fileProcessingService) {
-        this(extractionService, fileProcessingService, new FileProcessingProperties(), null);
+        this(extractionService, fileProcessingService, new FileProcessingProperties(), null, null);
     }
 
     private String getFileKey(String url) {
@@ -367,6 +371,14 @@ public class ScdfStreamProcessor {
             String payload = inputMsg.getPayload();
             MessageHeaders headers = inputMsg.getHeaders();
         logger.debug("Received message: {}", payload);
+        
+        // Check if processing is enabled
+        if (!processingStateService.isProcessingEnabled()) {
+            logger.info("Processing is currently disabled, skipping message");
+            return MessageBuilder.withPayload(new byte[0])
+                    .copyHeaders(inputMsg.getHeaders())
+                    .build();
+        }
         
         try {
             JsonNode root = objectMapper.readTree(payload);

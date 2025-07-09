@@ -137,6 +137,19 @@
             z-index: 1000;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
+        
+        .btn-group .btn {
+            margin-right: 0.5rem;
+        }
+        
+        .btn-group .btn:last-child {
+            margin-right: 0;
+        }
+        
+        .processing-controls {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 1px solid #dee2e6;
+        }
     </style>
 </head>
 <body>
@@ -156,24 +169,40 @@
     </nav>
 
     <div class="container mt-4">
-        <!-- Stream Information -->
+        <!-- Processing Controls -->
         <div class="row mb-4">
             <div class="col-12">
-                <div class="card">
+                <div class="card processing-controls">
                     <div class="card-body">
                         <h5 class="card-title">
-                            <i class="bi bi-diagram-3"></i> Stream Configuration
+                            <i class="bi bi-gear"></i> Processing Controls
                         </h5>
-            <div class="row">
-                <div class="col-md-6">
-                                <p class="mb-1"><strong>Input Stream:</strong> 
-                                    <span class="badge bg-primary" th:text="${inputStream}"></span>
-                                </p>
-                </div>
-                <div class="col-md-6">
-                                <p class="mb-1"><strong>Output Stream:</strong> 
-                                    <span class="badge bg-success" th:text="${outputStream}"></span>
-                                </p>
+                        <div class="row align-items-center">
+                            <div class="col-md-3">
+                                <p class="mb-1"><strong>Current Status:</strong></p>
+                                <span class="badge" 
+                                      th:class="${processingState == 'STARTED' ? 'bg-success' : 'bg-danger'}"
+                                      th:text="${processingState}">STOPPED</span>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="btn-group" role="group">
+                                    <button type="button" class="btn btn-success" id="startBtn" onclick="startProcessing()">
+                                        <i class="bi bi-play-circle"></i> Start Processing
+                                    </button>
+                                    <button type="button" class="btn btn-warning" id="stopBtn" onclick="stopProcessing()">
+                                        <i class="bi bi-pause-circle"></i> Stop Processing
+                                    </button>
+                                    <button type="button" class="btn btn-danger" onclick="resetProcessing()">
+                                        <i class="bi bi-arrow-clockwise"></i> Reset
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <p class="mb-1"><strong>Stream Info:</strong></p>
+                                <small class="text-muted">
+                                    Input: <span class="badge bg-primary" th:text="${inputStream}"></span><br>
+                                    Output: <span class="badge bg-success" th:text="${outputStream}"></span>
+                                </small>
                             </div>
                         </div>
                     </div>
@@ -365,6 +394,78 @@
             }
         `;
         document.head.appendChild(style);
+        
+        // Processing control functions
+        function startProcessing() {
+            fetch('/api/processing/start', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    updateProcessingState(data.processingState);
+                    showNotification('Processing started successfully', 'success');
+                })
+                .catch(error => {
+                    console.error('Error starting processing:', error);
+                    showNotification('Failed to start processing', 'error');
+                });
+        }
+        
+        function stopProcessing() {
+            fetch('/api/processing/stop', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    updateProcessingState(data.processingState);
+                    showNotification('Processing stopped successfully', 'success');
+                })
+                .catch(error => {
+                    console.error('Error stopping processing:', error);
+                    showNotification('Failed to stop processing', 'error');
+                });
+        }
+        
+        function resetProcessing() {
+            if (confirm('Are you sure you want to reset? This will stop processing and delete all processed files from HDFS.')) {
+                fetch('/api/processing/reset', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        updateProcessingState(data.processingState);
+                        showNotification('Reset completed successfully', 'success');
+                        // Refresh the page to show updated data
+                        setTimeout(() => location.reload(), 1000);
+                    })
+                    .catch(error => {
+                        console.error('Error resetting processing:', error);
+                        showNotification('Failed to reset processing', 'error');
+                    });
+            }
+        }
+        
+        function updateProcessingState(state) {
+            const statusBadge = document.querySelector('.badge[th\\:text="${processingState}"]');
+            if (statusBadge) {
+                statusBadge.textContent = state;
+                statusBadge.className = state === 'STARTED' ? 'badge bg-success' : 'badge bg-danger';
+            }
+        }
+        
+        function showNotification(message, type) {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = `alert alert-${type === 'success' ? 'success' : 'danger'} alert-dismissible fade show position-fixed`;
+            notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+            notification.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.remove();
+                }
+            }, 5000);
+        }
     </script>
 </body>
 </html>

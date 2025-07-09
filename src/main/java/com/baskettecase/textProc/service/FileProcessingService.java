@@ -66,4 +66,12 @@ public class FileProcessingService {
     public String getOutputStreamName() {
         return outputStreamName;
     }
+    
+    /**
+     * Clears all processed files from memory.
+     * Used during reset operations.
+     */
+    public void clearProcessedFiles() {
+        processedFiles.clear();
+    }
 }

@@ -2,6 +2,8 @@ package com.baskettecase.textProc.controller;
 
 import com.baskettecase.textProc.model.FileProcessingInfo;
 import com.baskettecase.textProc.service.FileProcessingService;
+import com.baskettecase.textProc.service.ProcessingStateService;
+import com.baskettecase.textProc.service.HdfsService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -11,6 +13,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 
 import java.io.IOException;
@@ -29,6 +32,8 @@ import java.util.stream.Collectors;
 public class FileProcessingController {
 
     private final FileProcessingService fileProcessingService;
+    private final ProcessingStateService processingStateService;
+    private final HdfsService hdfsService;
     
     @Value("${app.hdfs.base-url:http://35.196.56.130:9870/webhdfs/v1}")
     private String hdfsBaseUrl;
@@ -36,8 +41,12 @@ public class FileProcessingController {
     @Value("${app.hdfs.processed-files-path:/processed_files}")
     private String processedFilesPath;
 
-    public FileProcessingController(FileProcessingService fileProcessingService) {
+    public FileProcessingController(FileProcessingService fileProcessingService, 
+                                 ProcessingStateService processingStateService,
+                                 HdfsService hdfsService) {
         this.fileProcessingService = fileProcessingService;
+        this.processingStateService = processingStateService;
+        this.hdfsService = hdfsService;
     }
 
     /**
@@ -76,6 +85,7 @@ public class FileProcessingController {
         model.addAttribute("totalChunks", totalChunks);
         model.addAttribute("statusCounts", statusCounts);
         model.addAttribute("typeCounts", typeCounts);
+        model.addAttribute("processingState", processingStateService.getProcessingState());
         
         return "files";
     }
@@ -145,5 +155,76 @@ public class FileProcessingController {
         } catch (Exception e) {
             return new ResponseEntity<>("Error reading file from HDFS: " + e.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
         }
+    }
+    
+    /**
+     * Starts file processing.
+     * @return JSON response indicating the new processing state
+     */
+    @PostMapping("/api/processing/start")
+    @ResponseBody
+    public Map<String, Object> startProcessing() {
+        processingStateService.startProcessing();
+        return Map.of(
+            "status", "success",
+            "message", "Processing started",
+            "processingState", processingStateService.getProcessingState()
+        );
+    }
+    
+    /**
+     * Stops file processing.
+     * @return JSON response indicating the new processing state
+     */
+    @PostMapping("/api/processing/stop")
+    @ResponseBody
+    public Map<String, Object> stopProcessing() {
+        processingStateService.stopProcessing();
+        return Map.of(
+            "status", "success",
+            "message", "Processing stopped",
+            "processingState", processingStateService.getProcessingState()
+        );
+    }
+    
+    /**
+     * Resets the application by stopping processing and clearing processed files from HDFS.
+     * @return JSON response indicating the reset operation result
+     */
+    @PostMapping("/api/processing/reset")
+    @ResponseBody
+    public Map<String, Object> resetProcessing() {
+        // Stop processing first
+        processingStateService.stopProcessing();
+        
+        // Clear processed files from memory
+        fileProcessingService.clearProcessedFiles();
+        
+        // Delete processed files directory from HDFS
+        boolean hdfsCleared = hdfsService.deleteProcessedFilesDirectory();
+        
+        // Recreate the directory for future use
+        boolean directoryRecreated = hdfsService.createProcessedFilesDirectory();
+        
+        return Map.of(
+            "status", "success",
+            "message", "Reset completed",
+            "processingState", processingStateService.getProcessingState(),
+            "hdfsCleared", hdfsCleared,
+            "directoryRecreated", directoryRecreated
+        );
+    }
+    
+    /**
+     * Gets the current processing state.
+     * @return JSON response with the current processing state
+     */
+    @GetMapping("/api/processing/state")
+    @ResponseBody
+    public Map<String, Object> getProcessingState() {
+        return Map.of(
+            "processingState", processingStateService.getProcessingState(),
+            "isProcessingEnabled", processingStateService.isProcessingEnabled()
+        );
     }
 }
