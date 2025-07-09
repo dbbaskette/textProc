@@ -21,12 +21,7 @@ public class ConsumerLifecycleService {
     private static final Logger logger = LoggerFactory.getLogger(ConsumerLifecycleService.class);
     
     private final List<SimpleMessageListenerContainer> containers = new CopyOnWriteArrayList<>();
-    private final ProcessingStateService processingStateService;
-    
-    @Autowired
-    public ConsumerLifecycleService(ProcessingStateService processingStateService) {
-        this.processingStateService = processingStateService;
-    }
+    private ProcessingStateService processingStateService;
     
     /**
      * Registers a message listener container for lifecycle management.
@@ -37,7 +32,7 @@ public class ConsumerLifecycleService {
         logger.info("Registered message listener container: {}", container.getListenerId());
         
         // Set initial state based on processing state
-        if (!processingStateService.isProcessingEnabled()) {
+        if (processingStateService != null && !processingStateService.isProcessingEnabled()) {
             pauseConsumers();
         }
     }
@@ -82,5 +77,14 @@ public class ConsumerLifecycleService {
         long runningCount = containers.stream().filter(SimpleMessageListenerContainer::isRunning).count();
         long totalCount = containers.size();
         return String.format("%d/%d consumers running", runningCount, totalCount);
+    }
+    
+    /**
+     * Sets the processing state service (called after initialization to break circular dependency).
+     * @param processingStateService The processing state service
+     */
+    @Autowired
+    public void setProcessingStateService(ProcessingStateService processingStateService) {
+        this.processingStateService = processingStateService;
     }
 } 

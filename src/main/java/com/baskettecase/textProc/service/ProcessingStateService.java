@@ -11,12 +11,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Service
 public class ProcessingStateService {
     private final AtomicBoolean isProcessingEnabled = new AtomicBoolean(false); // Default to stopped
-    private final ConsumerLifecycleService consumerLifecycleService;
-    
-    @Autowired
-    public ProcessingStateService(ConsumerLifecycleService consumerLifecycleService) {
-        this.consumerLifecycleService = consumerLifecycleService;
-    }
+    private ConsumerLifecycleService consumerLifecycleService;
     
     /**
      * Checks if processing is currently enabled.
@@ -31,7 +26,9 @@ public class ProcessingStateService {
      */
     public void startProcessing() {
         isProcessingEnabled.set(true);
-        consumerLifecycleService.resumeConsumers();
+        if (consumerLifecycleService != null) {
+            consumerLifecycleService.resumeConsumers();
+        }
     }
     
     /**
@@ -39,7 +36,9 @@ public class ProcessingStateService {
      */
     public void stopProcessing() {
         isProcessingEnabled.set(false);
-        consumerLifecycleService.pauseConsumers();
+        if (consumerLifecycleService != null) {
+            consumerLifecycleService.pauseConsumers();
+        }
     }
     
     /**
@@ -55,6 +54,18 @@ public class ProcessingStateService {
      * @return A string describing the consumer status
      */
     public String getConsumerStatus() {
-        return consumerLifecycleService.getConsumerStatus();
+        if (consumerLifecycleService != null) {
+            return consumerLifecycleService.getConsumerStatus();
+        }
+        return "Consumer service not available";
+    }
+    
+    /**
+     * Sets the consumer lifecycle service (called after initialization to break circular dependency).
+     * @param consumerLifecycleService The consumer lifecycle service
+     */
+    @Autowired
+    public void setConsumerLifecycleService(ConsumerLifecycleService consumerLifecycleService) {
+        this.consumerLifecycleService = consumerLifecycleService;
     }
 } 
