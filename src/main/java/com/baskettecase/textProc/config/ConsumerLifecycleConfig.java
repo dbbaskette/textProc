@@ -19,10 +19,14 @@ import java.util.Map;
 public class ConsumerLifecycleConfig {
     private static final Logger logger = LoggerFactory.getLogger(ConsumerLifecycleConfig.class);
     
-    private final ConsumerLifecycleService consumerLifecycleService;
+    private ConsumerLifecycleService consumerLifecycleService;
     
+    /**
+     * Sets the consumer lifecycle service (called after initialization to break circular dependency).
+     * @param consumerLifecycleService The consumer lifecycle service
+     */
     @Autowired
-    public ConsumerLifecycleConfig(ConsumerLifecycleService consumerLifecycleService) {
+    public void setConsumerLifecycleService(ConsumerLifecycleService consumerLifecycleService) {
         this.consumerLifecycleService = consumerLifecycleService;
     }
     
@@ -32,6 +36,11 @@ public class ConsumerLifecycleConfig {
      */
     @EventListener
     public void handleContextRefresh(ContextRefreshedEvent event) {
+        if (consumerLifecycleService == null) {
+            logger.warn("ConsumerLifecycleService not available, skipping container registration");
+            return;
+        }
+        
         Map<String, SimpleMessageListenerContainer> containers = 
             event.getApplicationContext().getBeansOfType(SimpleMessageListenerContainer.class);
         
