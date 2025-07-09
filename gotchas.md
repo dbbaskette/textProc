@@ -2,6 +2,30 @@
 
 This document tracks issues encountered during development and their solutions.
 
+## Processing State Issues
+
+### Problem: Files Processed Even When Disabled
+**Issue**: Application processes files even when processing state is set to STOPPED
+
+**Root Cause**: The `ScdfStreamProcessor` was not checking the processing state before processing files
+
+**Solution**: Added processing state check at the beginning of the `textProc()` function
+```java
+// Check if processing is enabled
+if (!processingStateService.isProcessingEnabled()) {
+    logger.info("Processing is disabled, skipping message: {}", payload);
+    return MessageBuilder.withPayload(new byte[0])
+            .copyHeaders(inputMsg.getHeaders())
+            .build();
+}
+```
+
+**Result**: 
+- Files are now only processed when processing is enabled
+- When disabled, messages are received but skipped with empty response
+- UI state now correctly reflects actual processing behavior
+- Consumer lifecycle management works as expected
+
 ## Architecture Improvements
 
 ### Problem: Circular Dependency Between Services
@@ -67,4 +91,5 @@ For Cloud Foundry deployment, RabbitMQ configuration comes from service binding 
 2. **Avoid Circular Dependencies**: If you need them, reconsider the design
 3. **Single Responsibility**: Each service should have one clear purpose
 4. **Let CF Handle Service Binding**: Don't override with explicit configuration
-5. **Start with Simple**: Complex injection patterns usually indicate design issues 
+5. **Start with Simple**: Complex injection patterns usually indicate design issues
+6. **Check State Early**: Always verify processing state before expensive operations 

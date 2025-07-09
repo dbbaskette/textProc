@@ -2,11 +2,12 @@
 
 ![Java](https://img.shields.io/badge/Java-21-blue?logo=java)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.4.5-brightgreen?logo=springboot)
+![Spring Cloud](https://img.shields.io/badge/Spring_Cloud-2024.0.1-orange?logo=spring)
 ![Apache Tika](https://img.shields.io/badge/Apache_Tika-2.9.2-yellow?logo=apache)
 ![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3.12.0-orange?logo=rabbitmq)
 ![HDFS](https://img.shields.io/badge/HDFS-3.3.0-lightblue?logo=apache)
 
-A powerful Spring Boot application for extracting and processing text from documents using Apache Tika. Supports both standalone file processing and Spring Cloud Data Flow (SCDF) stream processing with RabbitMQ integration.
+A powerful Spring Boot application for extracting and processing text from documents using Apache Tika. Features event-driven architecture, Spring Cloud Data Flow (SCDF) integration, and real-time processing controls for demo management.
 
 ## 🚀 Quick Start
 
@@ -28,6 +29,32 @@ mvn spring-boot:run -Dspring-boot.run.profiles=standalone
 # Run in SCDF mode (processes files from RabbitMQ queue)
 mvn spring-boot:run -Dspring-boot.run.profiles=scdf
 ```
+
+## 🏗️ Architecture
+
+### Event-Driven Design
+The application uses Spring's event publishing mechanism for loose coupling between services:
+
+```java
+// ProcessingStateService publishes events
+public void startProcessing() {
+    isProcessingEnabled.set(true);
+    eventPublisher.publishEvent(new ProcessingStartedEvent(this));
+}
+
+// ConsumerLifecycleService listens to events
+@EventListener
+public void handleProcessingStarted(ProcessingStartedEvent event) {
+    resumeConsumers();
+}
+```
+
+### Key Benefits
+- **No Circular Dependencies**: Services communicate through events
+- **Loose Coupling**: Services don't directly depend on each other
+- **Testability**: Each service can be tested independently
+- **Extensibility**: Easy to add new event listeners
+- **Single Responsibility**: Each service has a clear, focused purpose
 
 ## 📋 Features
 
@@ -52,12 +79,19 @@ mvn spring-boot:run -Dspring-boot.run.profiles=scdf
 - Sends processed file locations to output queue
 - Web UI for monitoring processed files
 
+### 🎛️ **Processing Controls**
+- **Start/Stop Processing**: Control when files are processed
+- **Consumer Management**: Pause/resume RabbitMQ consumers
+- **Reset Functionality**: Clear processed files and restart fresh
+- **Real-time Status**: Monitor processing state and consumer status
+- **Demo Management**: Perfect for controlled demonstrations
+
 ### 🌐 **Web Interface**
 - **Real-time Monitoring**: View all processed files with details
 - **Text Preview**: Click filenames to view extracted text content
 - **Processing Statistics**: File sizes, chunk counts, processing times
 - **Stream Information**: Input/output stream configuration
-- **Processing Controls**: Start/stop processing and reset functionality for demo management
+- **Processing Controls**: Start/stop/reset buttons with status display
 
 ## ⚙️ Configuration
 
@@ -65,7 +99,7 @@ mvn spring-boot:run -Dspring-boot.run.profiles=scdf
 
 #### **Required for SCDF Mode**
 ```bash
-# RabbitMQ Configuration
+# RabbitMQ Configuration (auto-configured by Cloud Foundry service binding)
 SPRING_RABBITMQ_HOST=localhost
 SPRING_RABBITMQ_PORT=5672
 SPRING_RABBITMQ_USERNAME=guest
@@ -155,11 +189,10 @@ services:
 mvn clean package
 
 # Deploy to Cloud Foundry
-cf push textProc -p target/textProc-1.2.0.jar
+cf push textProc -p target/textProc-1.9.4.jar
 
 # Set environment variables
 cf set-env textProc SPRING_PROFILES_ACTIVE scdf
-cf set-env textProc SPRING_RABBITMQ_HOST your-rabbitmq-host
 cf set-env textProc HDFS_NAMENODE_URL http://your-namenode:50070/webhdfs/v1
 ```
 
@@ -174,7 +207,6 @@ applications:
     - java_buildpack
   env:
     SPRING_PROFILES_ACTIVE: scdf
-    SPRING_RABBITMQ_HOST: your-rabbitmq-host
     HDFS_NAMENODE_URL: http://your-namenode:50070/webhdfs/v1
 ```
 
@@ -196,6 +228,16 @@ textProc/
 ```
 
 ### Key Components
+
+#### **ProcessingStateService**
+- Manages application processing state (started/stopped)
+- Publishes events when state changes
+- Uses atomic boolean for thread-safe state management
+
+#### **ConsumerLifecycleService**
+- Manages RabbitMQ consumer lifecycle
+- Listens to processing state events
+- Pauses/resumes consumers based on processing state
 
 #### **ScdfStreamProcessor**
 - Handles RabbitMQ message processing
@@ -236,6 +278,20 @@ mvn test jacoco:report
   - Click filenames to preview extracted text
   - Monitor processing statistics
   - Check stream configuration
+  - Control processing state
+
+### REST API Endpoints
+
+#### **Processing Controls**
+- `POST /api/processing/start` - Start processing
+- `POST /api/processing/stop` - Stop processing
+- `POST /api/processing/reset` - Reset (stop + clear files)
+- `GET /api/processing/state` - Get current state
+
+#### **Health & Monitoring**
+- `GET /actuator/health` - Application health check
+- `GET /actuator/info` - Application information
+- `GET /actuator/metrics` - Application metrics
 
 ### Logging
 ```bash
@@ -249,21 +305,17 @@ cf logs textProc
 cf logs textProc --recent | grep "Processing"
 ```
 
-### Health Checks
-- **Health Endpoint**: `GET /actuator/health`
-- **Info Endpoint**: `GET /actuator/info`
-- **Metrics**: `GET /actuator/metrics`
-
 ## 🔄 Processing Workflow
 
 ### SCDF Mode Workflow
 1. **Receive Message**: RabbitMQ message with file URL
-2. **Download File**: Download from HDFS/S3 to local temp storage
-3. **Extract Text**: Use Apache Tika to extract text content
-4. **Write to HDFS**: Save processed text to `/processed_files/` directory
-5. **Send Message**: Send processed file location to output queue
-6. **Update UI**: Update web interface with processing status
-7. **Cleanup**: Remove temporary files
+2. **Check Processing State**: Only process if enabled
+3. **Download File**: Download from HDFS/S3 to local temp storage
+4. **Extract Text**: Use Apache Tika to extract text content
+5. **Write to HDFS**: Save processed text to `/processed_files/` directory
+6. **Send Message**: Send processed file location to output queue
+7. **Update UI**: Update web interface with processing status
+8. **Cleanup**: Remove temporary files
 
 ### Standalone Mode Workflow
 1. **Scan Directory**: Monitor input directory for new files
@@ -277,7 +329,7 @@ cf logs textProc --recent | grep "Processing"
 ### Common Issues
 
 #### **Files Not Appearing in UI**
-- Check if files are being processed (check logs)
+- Check if processing is enabled (default: STOPPED)
 - Verify RabbitMQ connection
 - Ensure HDFS URLs are accessible
 
@@ -300,22 +352,11 @@ cf set-env textProc LOGGING_LEVEL_COM_BASKETTECASE DEBUG
 cf restart textProc
 ```
 
-## 📚 API Reference
+## 📚 Documentation
 
-### REST Endpoints
-
-#### **GET /** or **GET /files**
-- **Description**: Web interface for viewing processed files
-- **Response**: HTML page with file list and details
-
-#### **GET /processed-text/{filename}**
-- **Description**: Download processed text content
-- **Parameters**: `filename` - Name of the processed file
-- **Response**: Plain text content
-
-#### **GET /actuator/health**
-- **Description**: Application health check
-- **Response**: JSON with health status
+- **[CONTROLS.md](CONTROLS.md)** - Processing controls and demo management
+- **[gotchas.md](gotchas.md)** - Known issues and solutions
+- **[implementation_details.md](implementation_details.md)** - Technical implementation details
 
 ## 🤝 Contributing
 
@@ -337,5 +378,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Version**: 1.2.0  
+**Version**: 1.9.4  
 **Last Updated**: July 2024

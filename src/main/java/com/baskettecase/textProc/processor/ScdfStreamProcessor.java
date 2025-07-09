@@ -370,128 +370,134 @@ public class ScdfStreamProcessor {
         return inputMsg -> {
             String payload = inputMsg.getPayload();
             MessageHeaders headers = inputMsg.getHeaders();
-        logger.debug("Received message: {}", payload);
+            logger.debug("Received message: {}", payload);
+            
+            // Check if processing is enabled
+            if (!processingStateService.isProcessingEnabled()) {
+                logger.info("Processing is disabled, skipping message: {}", payload);
+                return MessageBuilder.withPayload(new byte[0])
+                        .copyHeaders(inputMsg.getHeaders())
+                        .build();
+            }
         
+            try {
+                JsonNode root = objectMapper.readTree(payload);
+                String type = root.path("type").asText("");
+                String webhdfsUrl;
 
-        
-        try {
-            JsonNode root = objectMapper.readTree(payload);
-            String type = root.path("type").asText("");
-            String webhdfsUrl;
-
-                switch (type.toUpperCase()) {
-                    case "S3":
-                        // For S3, we'll keep the existing behavior for now
-                        String extractedText = processS3File(root);
-                        logger.info("Extraction complete ({} chars)", extractedText.length());
-                        return MessageBuilder.withPayload(extractedText.getBytes(StandardCharsets.UTF_8))
-                                .copyHeaders(inputMsg.getHeaders())
-                                .build();
-                        
-                    case "HDFS":
-                        webhdfsUrl = root.path("url").asText();
-                        if (webhdfsUrl == null || webhdfsUrl.trim().isEmpty()) {
-                            throw new IllegalArgumentException("Missing or empty 'url' field for HDFS type");
-                        }
-                        
-                        // Extract the filename from the URL
-                        String filename = webhdfsUrl.substring(webhdfsUrl.lastIndexOf('/') + 1);
-                        try {
-                            filename = java.net.URLDecoder.decode(filename, StandardCharsets.UTF_8.name());
-                        } catch (UnsupportedEncodingException e) {
-                            logger.warn("Failed to decode filename: " + filename, e);
-                        }
-                        // Check if we've already processed this file
-                        String fileKey = getFileKey(webhdfsUrl);
-                        if (processedFiles.containsKey(fileKey)) {
-                            logger.info("Skipping already processed file: {}", webhdfsUrl);
-                            return MessageBuilder.withPayload(new byte[0])
+                    switch (type.toUpperCase()) {
+                        case "S3":
+                            // For S3, we'll keep the existing behavior for now
+                            String extractedText = processS3File(root);
+                            logger.info("Extraction complete ({} chars)", extractedText.length());
+                            return MessageBuilder.withPayload(extractedText.getBytes(StandardCharsets.UTF_8))
                                     .copyHeaders(inputMsg.getHeaders())
                                     .build();
-                        }
-                        
-                        // Track file processing
-                        FileProcessingInfo fileInfo = new FileProcessingInfo();
-                        fileInfo.setFilename(filename);
-                        fileInfo.setProcessedAt(LocalDateTime.now());
-                        fileInfo.setStatus("PROCESSING");
-                        fileInfo.setChunkSize(CHUNK_SIZE);
-                        fileInfo.setInputStream(root.path("inputStream").asText("default-input"));
-                        fileInfo.setOutputStream(root.path("outputStream").asText("default-output"));
-                        
-                        // Set stream names in the service
-                        fileProcessingService.setStreamNames(
-                            fileInfo.getInputStream(),
-                            fileInfo.getOutputStream()
-                        );
-                        
-                        logger.info("Processing new file: {}", webhdfsUrl);
-                        
-                        // Download the file once and process it
-                        Path tempFile = downloadHdfsFile(webhdfsUrl);
-                        try {
-                            // Extract the full text content
-                            String processedText = extractionService.extractTextFromFile(tempFile);
                             
-                            if (processedText == null || processedText.trim().isEmpty()) {
-                                logger.warn("No text was extracted from file: {}", webhdfsUrl);
+                        case "HDFS":
+                            webhdfsUrl = root.path("url").asText();
+                            if (webhdfsUrl == null || webhdfsUrl.trim().isEmpty()) {
+                                throw new IllegalArgumentException("Missing or empty 'url' field for HDFS type");
+                            }
+                            
+                            // Extract the filename from the URL
+                            String filename = webhdfsUrl.substring(webhdfsUrl.lastIndexOf('/') + 1);
+                            try {
+                                filename = java.net.URLDecoder.decode(filename, StandardCharsets.UTF_8.name());
+                            } catch (UnsupportedEncodingException e) {
+                                logger.warn("Failed to decode filename: " + filename, e);
+                            }
+                            // Check if we've already processed this file
+                            String fileKey = getFileKey(webhdfsUrl);
+                            if (processedFiles.containsKey(fileKey)) {
+                                logger.info("Skipping already processed file: {}", webhdfsUrl);
                                 return MessageBuilder.withPayload(new byte[0])
                                         .copyHeaders(inputMsg.getHeaders())
                                         .build();
                             }
                             
-                            // Update file info with processing results using the temporary file
-                            fileInfo.setFileSize(Files.size(tempFile));
-                            fileInfo.setChunkCount(1); // Single processed file
-                            fileInfo.setStatus("COMPLETED");
-                            fileInfo.setFileType(Files.probeContentType(tempFile));
-                            fileProcessingService.addProcessedFile(fileInfo);
+                            // Track file processing
+                            FileProcessingInfo fileInfo = new FileProcessingInfo();
+                            fileInfo.setFilename(filename);
+                            fileInfo.setProcessedAt(LocalDateTime.now());
+                            fileInfo.setStatus("PROCESSING");
+                            fileInfo.setChunkSize(CHUNK_SIZE);
+                            fileInfo.setInputStream(root.path("inputStream").asText("default-input"));
+                            fileInfo.setOutputStream(root.path("outputStream").asText("default-output"));
                             
-                            // Log processing information
-                            logger.info("Extracted {} characters from file: {}", processedText.length(), webhdfsUrl);
+                            // Set stream names in the service
+                            fileProcessingService.setStreamNames(
+                                fileInfo.getInputStream(),
+                                fileInfo.getOutputStream()
+                            );
                             
-                            // Write processed text to temp file for UI display
+                            logger.info("Processing new file: {}", webhdfsUrl);
+                            
+                            // Download the file once and process it
+                            Path tempFile = downloadHdfsFile(webhdfsUrl);
                             try {
-                                Path tempTextFile = extractionService.writeExtractedTextToTempFile(filename, processedText);
-                                logger.debug("Saved processed text for UI display: {}", tempTextFile);
-                            } catch (Exception e) {
-                                logger.warn("Failed to write processed text to temp file for {}: {}", filename, e.getMessage());
+                                // Extract the full text content
+                                String processedText = extractionService.extractTextFromFile(tempFile);
+                                
+                                if (processedText == null || processedText.trim().isEmpty()) {
+                                    logger.warn("No text was extracted from file: {}", webhdfsUrl);
+                                    return MessageBuilder.withPayload(new byte[0])
+                                            .copyHeaders(inputMsg.getHeaders())
+                                            .build();
+                                }
+                                
+                                // Update file info with processing results using the temporary file
+                                fileInfo.setFileSize(Files.size(tempFile));
+                                fileInfo.setChunkCount(1); // Single processed file
+                                fileInfo.setStatus("COMPLETED");
+                                fileInfo.setFileType(Files.probeContentType(tempFile));
+                                fileProcessingService.addProcessedFile(fileInfo);
+                                
+                                // Log processing information
+                                logger.info("Extracted {} characters from file: {}", processedText.length(), webhdfsUrl);
+                                
+                                // Write processed text to temp file for UI display
+                                try {
+                                    Path tempTextFile = extractionService.writeExtractedTextToTempFile(filename, processedText);
+                                    logger.debug("Saved processed text for UI display: {}", tempTextFile);
+                                } catch (Exception e) {
+                                    logger.warn("Failed to write processed text to temp file for {}: {}", filename, e.getMessage());
+                                }
+                                
+                                // Write the full processed text to HDFS
+                                String processedFileUrl = writeProcessedFileToHdfs(webhdfsUrl, filename, processedText);
+                                logger.info("Successfully wrote processed file to HDFS: {}", processedFileUrl);
+                                
+                                // Only mark as processed after successful completion
+                                processedFiles.put(fileKey, true);
+                                logger.info("Successfully processed and tracked file: {}", webhdfsUrl);
+                                
+                                // Create a message with the same format pointing to the processed file
+                                String processedMessage = createProcessedFileMessage(processedFileUrl, root);
+                                logger.debug("Sending processed file message to queue: {}", processedMessage);
+                                            
+                                // Return the JSON message using the preferred SCDF pattern
+                                // This sends the processed file information in JSON format
+                                return MessageBuilder.withPayload(processedMessage.getBytes(StandardCharsets.UTF_8))
+                                        .copyHeaders(headers)
+                                        .setHeader("originalFile", webhdfsUrl)
+                                        .setHeader("processedFileUrl", processedFileUrl)
+                                        .setHeader("extractedTextLength", processedText.length())
+                                        .build();
+                                
+                            } finally {
+                                // Clean up the temporary file after we're done with it
+                                cleanupTempFile(tempFile);
                             }
                             
-                            // Write the full processed text to HDFS
-                            String processedFileUrl = writeProcessedFileToHdfs(webhdfsUrl, filename, processedText);
-                            logger.info("Successfully wrote processed file to HDFS: {}", processedFileUrl);
-                            
-                            // Only mark as processed after successful completion
-                            processedFiles.put(fileKey, true);
-                            logger.info("Successfully processed and tracked file: {}", webhdfsUrl);
-                            
-                            // Create a message with the same format pointing to the processed file
-                            String processedMessage = createProcessedFileMessage(processedFileUrl, root);
-                            logger.debug("Sending processed file message to queue: {}", processedMessage);
-                                        
-                            // Return the JSON message using the preferred SCDF pattern
-                            // This sends the processed file information in JSON format
-                            return MessageBuilder.withPayload(processedMessage.getBytes(StandardCharsets.UTF_8))
-                                    .copyHeaders(headers)
-                                    .setHeader("originalFile", webhdfsUrl)
-                                    .setHeader("processedFileUrl", processedFileUrl)
-                                    .setHeader("extractedTextLength", processedText.length())
-                                    .build();
-                            
-                        } finally {
-                            // Clean up the temporary file after we're done with it
-                            cleanupTempFile(tempFile);
-                        }
-                        
-                    default:
-                        throw new IllegalArgumentException("Unsupported file source type: " + type);
+                        default:
+                            throw new IllegalArgumentException("Unsupported file source type: " + type);
+                    }
+                    
+                } catch (Exception e) {
+                    logger.error("Error processing message", e);
+                    throw new RuntimeException("Error processing message", e);
                 }
-                
-            } catch (Exception e) {
-                logger.error("Error processing message", e);
-                throw new RuntimeException("Error processing message", e);
-            }
         };
     }
 }

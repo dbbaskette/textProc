@@ -75,6 +75,46 @@ ConsumerLifecycleService handles event
 RabbitMQ consumers are paused/resumed
 ```
 
+## Stream Processing with State Management
+
+### Processing State Check
+
+The `ScdfStreamProcessor` now checks the processing state before processing any files:
+
+```java
+@Bean
+public Function<Message<String>, Message<byte[]>> textProc() {
+    return inputMsg -> {
+        // Check if processing is enabled
+        if (!processingStateService.isProcessingEnabled()) {
+            logger.info("Processing is disabled, skipping message: {}", payload);
+            return MessageBuilder.withPayload(new byte[0])
+                    .copyHeaders(inputMsg.getHeaders())
+                    .build();
+        }
+        
+        // Process file only if enabled
+        // ... rest of processing logic
+    };
+}
+```
+
+### Processing Flow
+
+1. **Message Received**: RabbitMQ message arrives
+2. **State Check**: Verify if processing is enabled
+3. **Skip or Process**: 
+   - If disabled: Return empty response, skip processing
+   - If enabled: Continue with file processing
+4. **Consumer Management**: Consumers remain active but processing is controlled
+
+### Benefits of State Check
+
+- **Prevents Unwanted Processing**: Files are not processed when disabled
+- **Maintains Message Flow**: Messages are still received but skipped
+- **UI Consistency**: Processing state matches actual behavior
+- **Demo Control**: Perfect for controlled demonstrations
+
 ## Original Architecture (Deprecated)
 
 The original design had circular dependencies:
@@ -109,4 +149,15 @@ This required complex injection patterns with `@Lazy` annotations and was diffic
 5. **Event Handling**: ConsumerLifecycleService receives and handles event
 6. **Consumer Management**: Containers are paused/resumed as needed
 7. **Response**: Controller returns status JSON
-8. **UI Update**: JavaScript updates UI based on response 
+8. **UI Update**: JavaScript updates UI based on response
+
+### Stream Processing Integration
+
+The stream processor integrates with the processing state system:
+
+1. **Message Arrival**: RabbitMQ message received
+2. **State Verification**: Check if processing is enabled
+3. **Conditional Processing**: Only process if state allows
+4. **Result Handling**: Return appropriate response based on state
+
+This ensures that the processing controls work correctly in the SCDF environment. 
