@@ -1,17 +1,24 @@
 package com.baskettecase.textProc.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Service for managing the processing state of the application.
  * Controls whether the application should process incoming files or not.
+ * Uses Spring events to notify other components of state changes.
  */
 @Service
 public class ProcessingStateService {
     private final AtomicBoolean isProcessingEnabled = new AtomicBoolean(false); // Default to stopped
-    private ConsumerLifecycleService consumerLifecycleService;
+    private final ApplicationEventPublisher eventPublisher;
+    
+    @Autowired
+    public ProcessingStateService(ApplicationEventPublisher eventPublisher) {
+        this.eventPublisher = eventPublisher;
+    }
     
     /**
      * Checks if processing is currently enabled.
@@ -22,23 +29,19 @@ public class ProcessingStateService {
     }
     
     /**
-     * Enables file processing and resumes message consumers.
+     * Enables file processing and publishes a start event.
      */
     public void startProcessing() {
         isProcessingEnabled.set(true);
-        if (consumerLifecycleService != null) {
-            consumerLifecycleService.resumeConsumers();
-        }
+        eventPublisher.publishEvent(new ProcessingStartedEvent(this));
     }
     
     /**
-     * Disables file processing and pauses message consumers.
+     * Disables file processing and publishes a stop event.
      */
     public void stopProcessing() {
         isProcessingEnabled.set(false);
-        if (consumerLifecycleService != null) {
-            consumerLifecycleService.pauseConsumers();
-        }
+        eventPublisher.publishEvent(new ProcessingStoppedEvent(this));
     }
     
     /**
@@ -50,22 +53,32 @@ public class ProcessingStateService {
     }
     
     /**
-     * Gets the consumer status.
-     * @return A string describing the consumer status
+     * Event published when processing is started.
      */
-    public String getConsumerStatus() {
-        if (consumerLifecycleService != null) {
-            return consumerLifecycleService.getConsumerStatus();
+    public static class ProcessingStartedEvent {
+        private final ProcessingStateService source;
+        
+        public ProcessingStartedEvent(ProcessingStateService source) {
+            this.source = source;
         }
-        return "Consumer service not available";
+        
+        public ProcessingStateService getSource() {
+            return source;
+        }
     }
     
     /**
-     * Sets the consumer lifecycle service (called after initialization to break circular dependency).
-     * @param consumerLifecycleService The consumer lifecycle service
+     * Event published when processing is stopped.
      */
-    @Autowired
-    public void setConsumerLifecycleService(ConsumerLifecycleService consumerLifecycleService) {
-        this.consumerLifecycleService = consumerLifecycleService;
+    public static class ProcessingStoppedEvent {
+        private final ProcessingStateService source;
+        
+        public ProcessingStoppedEvent(ProcessingStateService source) {
+            this.source = source;
+        }
+        
+        public ProcessingStateService getSource() {
+            return source;
+        }
     }
 } 

@@ -3,25 +3,21 @@ package com.baskettecase.textProc.service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.cloud.stream.binder.rabbit.RabbitMessageChannelBinder;
-import org.springframework.cloud.stream.binder.rabbit.properties.RabbitBinderConfigurationProperties;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
-import jakarta.annotation.PostConstruct;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Service for managing RabbitMQ consumer lifecycle.
- * Allows pausing and resuming message consumption.
+ * Listens to processing state events and manages consumer lifecycle accordingly.
  */
 @Service
 public class ConsumerLifecycleService {
     private static final Logger logger = LoggerFactory.getLogger(ConsumerLifecycleService.class);
     
     private final List<SimpleMessageListenerContainer> containers = new CopyOnWriteArrayList<>();
-    private ProcessingStateService processingStateService;
     
     /**
      * Registers a message listener container for lifecycle management.
@@ -31,16 +27,37 @@ public class ConsumerLifecycleService {
         containers.add(container);
         logger.info("Registered message listener container: {}", container.getListenerId());
         
-        // Set initial state based on processing state
-        if (processingStateService != null && !processingStateService.isProcessingEnabled()) {
-            pauseConsumers();
+        // Start paused since processing starts disabled by default
+        if (container.isRunning()) {
+            container.stop();
+            logger.info("Initially paused container: {}", container.getListenerId());
         }
+    }
+    
+    /**
+     * Event listener for processing started events.
+     * @param event The processing started event
+     */
+    @EventListener
+    public void handleProcessingStarted(ProcessingStateService.ProcessingStartedEvent event) {
+        logger.info("Received processing started event, resuming consumers");
+        resumeConsumers();
+    }
+    
+    /**
+     * Event listener for processing stopped events.
+     * @param event The processing stopped event
+     */
+    @EventListener
+    public void handleProcessingStopped(ProcessingStateService.ProcessingStoppedEvent event) {
+        logger.info("Received processing stopped event, pausing consumers");
+        pauseConsumers();
     }
     
     /**
      * Pauses all registered message consumers.
      */
-    public void pauseConsumers() {
+    private void pauseConsumers() {
         for (SimpleMessageListenerContainer container : containers) {
             if (container.isRunning()) {
                 container.stop();
@@ -52,7 +69,7 @@ public class ConsumerLifecycleService {
     /**
      * Resumes all registered message consumers.
      */
-    public void resumeConsumers() {
+    private void resumeConsumers() {
         for (SimpleMessageListenerContainer container : containers) {
             if (!container.isRunning()) {
                 container.start();
@@ -77,14 +94,5 @@ public class ConsumerLifecycleService {
         long runningCount = containers.stream().filter(SimpleMessageListenerContainer::isRunning).count();
         long totalCount = containers.size();
         return String.format("%d/%d consumers running", runningCount, totalCount);
-    }
-    
-    /**
-     * Sets the processing state service (called after initialization to break circular dependency).
-     * @param processingStateService The processing state service
-     */
-    @Autowired
-    public void setProcessingStateService(ProcessingStateService processingStateService) {
-        this.processingStateService = processingStateService;
     }
 } 

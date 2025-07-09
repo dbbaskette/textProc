@@ -4,6 +4,7 @@ import com.baskettecase.textProc.model.FileProcessingInfo;
 import com.baskettecase.textProc.service.FileProcessingService;
 import com.baskettecase.textProc.service.ProcessingStateService;
 import com.baskettecase.textProc.service.HdfsService;
+import com.baskettecase.textProc.service.ConsumerLifecycleService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -33,6 +34,7 @@ public class FileProcessingController {
 
     private final FileProcessingService fileProcessingService;
     private final ProcessingStateService processingStateService;
+    private final ConsumerLifecycleService consumerLifecycleService;
     private final HdfsService hdfsService;
     
     @Value("${app.hdfs.base-url:http://35.196.56.130:9870/webhdfs/v1}")
@@ -43,9 +45,11 @@ public class FileProcessingController {
 
     public FileProcessingController(FileProcessingService fileProcessingService, 
                                  ProcessingStateService processingStateService,
+                                 ConsumerLifecycleService consumerLifecycleService,
                                  HdfsService hdfsService) {
         this.fileProcessingService = fileProcessingService;
         this.processingStateService = processingStateService;
+        this.consumerLifecycleService = consumerLifecycleService;
         this.hdfsService = hdfsService;
     }
 
@@ -169,7 +173,7 @@ public class FileProcessingController {
             "status", "success",
             "message", "Processing started",
             "processingState", processingStateService.getProcessingState(),
-            "consumerStatus", processingStateService.getConsumerStatus()
+            "consumerStatus", consumerLifecycleService.getConsumerStatus()
         );
     }
     
@@ -185,7 +189,7 @@ public class FileProcessingController {
             "status", "success",
             "message", "Processing stopped",
             "processingState", processingStateService.getProcessingState(),
-            "consumerStatus", processingStateService.getConsumerStatus()
+            "consumerStatus", consumerLifecycleService.getConsumerStatus()
         );
     }
     
@@ -212,7 +216,7 @@ public class FileProcessingController {
             "status", "success",
             "message", "Reset completed",
             "processingState", processingStateService.getProcessingState(),
-            "consumerStatus", processingStateService.getConsumerStatus(),
+            "consumerStatus", consumerLifecycleService.getConsumerStatus(),
             "hdfsCleared", hdfsCleared,
             "directoryRecreated", directoryRecreated
         );
@@ -228,7 +232,7 @@ public class FileProcessingController {
         return Map.of(
             "processingState", processingStateService.getProcessingState(),
             "isProcessingEnabled", processingStateService.isProcessingEnabled(),
-            "consumerStatus", processingStateService.getConsumerStatus()
+            "consumerStatus", consumerLifecycleService.getConsumerStatus()
         );
     }
 }
