@@ -81,10 +81,10 @@ public class ConsumerLifecycleService {
         
         try {
             if ("STARTED".equals(stateName)) {
-                var result = streamControlEndpoint.startBinding(BINDING_NAME);
+                var result = streamControlEndpoint.controlBinding(BINDING_NAME, "start");
                 logger.info("Start binding result: {}", result);
             } else if ("STOPPED".equals(stateName)) {
-                var result = streamControlEndpoint.stopBinding(BINDING_NAME);
+                var result = streamControlEndpoint.controlBinding(BINDING_NAME, "stop");
                 logger.info("Stop binding result: {}", result);
             } else {
                 logger.warn("Unsupported state name: {}. Use STARTED or STOPPED.", stateName);
@@ -108,7 +108,7 @@ public class ConsumerLifecycleService {
         }
         
         try {
-            var stateResult = streamControlEndpoint.getBindingState(BINDING_NAME);
+            var stateResult = streamControlEndpoint.controlBinding(BINDING_NAME, "status");
             if (stateResult != null && Boolean.TRUE.equals(stateResult.get("success"))) {
                 var state = stateResult.get("state");
                 // Check if the state indicates running
@@ -131,7 +131,7 @@ public class ConsumerLifecycleService {
         }
         
         try {
-            var stateResult = streamControlEndpoint.getBindingState(BINDING_NAME);
+            var stateResult = streamControlEndpoint.controlBinding(BINDING_NAME, "status");
             if (stateResult != null && Boolean.TRUE.equals(stateResult.get("success"))) {
                 var state = stateResult.get("state");
                 if (state != null) {

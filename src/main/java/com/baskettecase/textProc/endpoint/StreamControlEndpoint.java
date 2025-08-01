@@ -25,59 +25,62 @@ public class StreamControlEndpoint {
     }
     
     /**
-     * Starts the specified binding.
+     * Controls the specified binding based on the action parameter.
      * 
-     * @param bindingName The name of the binding to start (e.g., "textProc-in-0")
+     * @param bindingName The name of the binding to control (e.g., "textProc-in-0")
+     * @param action The action to perform: "start", "stop", or "status"
      * @return Result of the operation
      */
     @WriteOperation
-    public Map<String, Object> startBinding(String bindingName) {
-        logger.info("Starting binding: {}", bindingName);
+    public Map<String, Object> controlBinding(String bindingName, String action) {
+        logger.info("Controlling binding: {} with action: {}", bindingName, action);
         
         try {
             // Query current state
             var currentState = bindingsEndpoint.queryState(bindingName);
-            logger.info("Current state before start: {}", currentState);
+            logger.info("Current state before {}: {}", action, currentState);
             
-            // Start the binding using the documented REST approach
-            // The BindingsEndpoint supports changeState via reflection
-            // We'll try multiple approaches to find the right method
-            try {
-                // Approach 1: Try to find changeState method that accepts State enum
-                Class<?> bindingsClass = bindingsEndpoint.getClass();
-                java.lang.reflect.Method[] methods = bindingsClass.getMethods();
-                
-                for (java.lang.reflect.Method method : methods) {
-                    if ("changeState".equals(method.getName())) {
-                        Class<?>[] paramTypes = method.getParameterTypes();
-                        if (paramTypes.length == 2 && 
-                            String.class.equals(paramTypes[0]) && 
-                            paramTypes[1].isEnum()) {
-                            
-                            // Found the enum-based method, get the STARTED enum value
-                            Object[] enumConstants = paramTypes[1].getEnumConstants();
-                            for (Object enumConstant : enumConstants) {
-                                if ("STARTED".equals(enumConstant.toString())) {
-                                    method.invoke(bindingsEndpoint, bindingName, enumConstant);
-                                    logger.info("Successfully called changeState with STARTED enum");
-                                    break;
-                                }
-                            }
-                            break;
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                logger.warn("Failed to use changeState method, binding might not support state changes: {}", e.getMessage());
-                throw new RuntimeException("Unable to start binding - " + e.getMessage());
+            // Handle different actions
+            switch (action.toLowerCase()) {
+                case "start":
+                    return startBindingInternal(bindingName, currentState);
+                case "stop":
+                    return stopBindingInternal(bindingName, currentState);
+                case "status":
+                    return getBindingStateInternal(bindingName, currentState);
+                default:
+                    return Map.of(
+                        "operation", action,
+                        "bindingName", bindingName,
+                        "success", false,
+                        "error", "Unsupported action. Use 'start', 'stop', or 'status'"
+                    );
             }
+            
+        } catch (Exception e) {
+            logger.error("Failed to control binding {} with action {}: {}", bindingName, action, e.getMessage(), e);
+            return Map.of(
+                "operation", action,
+                "bindingName", bindingName,
+                "success", false,
+                "error", e.getMessage()
+            );
+        }
+    }
+    
+    /**
+     * Internal method to start a binding.
+     */
+    private Map<String, Object> startBindingInternal(String bindingName, Object currentState) {
+        try {
+            // Start the binding using the documented REST approach
+            changeBindingState(bindingName, "STARTED");
             
             // Wait a moment for the change to take effect
             Thread.sleep(1000);
             
             // Query new state
             var newState = bindingsEndpoint.queryState(bindingName);
-            logger.info("New state after start: {}", newState);
             
             return Map.of(
                 "operation", "start",
@@ -99,57 +102,18 @@ public class StreamControlEndpoint {
     }
     
     /**
-     * Stops the specified binding.
-     * 
-     * @param bindingName The name of the binding to stop (e.g., "textProc-in-0")
-     * @return Result of the operation
+     * Internal method to stop a binding.
      */
-    @WriteOperation
-    public Map<String, Object> stopBinding(String bindingName) {
-        logger.info("Stopping binding: {}", bindingName);
-        
+    private Map<String, Object> stopBindingInternal(String bindingName, Object currentState) {
         try {
-            // Query current state
-            var currentState = bindingsEndpoint.queryState(bindingName);
-            logger.info("Current state before stop: {}", currentState);
-            
             // Stop the binding using the documented REST approach
-            try {
-                // Find changeState method that accepts State enum
-                Class<?> bindingsClass = bindingsEndpoint.getClass();
-                java.lang.reflect.Method[] methods = bindingsClass.getMethods();
-                
-                for (java.lang.reflect.Method method : methods) {
-                    if ("changeState".equals(method.getName())) {
-                        Class<?>[] paramTypes = method.getParameterTypes();
-                        if (paramTypes.length == 2 && 
-                            String.class.equals(paramTypes[0]) && 
-                            paramTypes[1].isEnum()) {
-                            
-                            // Found the enum-based method, get the STOPPED enum value
-                            Object[] enumConstants = paramTypes[1].getEnumConstants();
-                            for (Object enumConstant : enumConstants) {
-                                if ("STOPPED".equals(enumConstant.toString())) {
-                                    method.invoke(bindingsEndpoint, bindingName, enumConstant);
-                                    logger.info("Successfully called changeState with STOPPED enum");
-                                    break;
-                                }
-                            }
-                            break;
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                logger.warn("Failed to use changeState method, binding might not support state changes: {}", e.getMessage());
-                throw new RuntimeException("Unable to stop binding - " + e.getMessage());
-            }
+            changeBindingState(bindingName, "STOPPED");
             
             // Wait a moment for the change to take effect
             Thread.sleep(1000);
             
             // Query new state
             var newState = bindingsEndpoint.queryState(bindingName);
-            logger.info("New state after stop: {}", newState);
             
             return Map.of(
                 "operation", "stop",
@@ -171,33 +135,52 @@ public class StreamControlEndpoint {
     }
     
     /**
-     * Gets the current state of a binding.
-     * 
-     * @param bindingName The name of the binding to query
-     * @return Current state information
+     * Internal method to get binding state.
      */
-    @WriteOperation
-    public Map<String, Object> getBindingState(String bindingName) {
-        logger.info("Getting state for binding: {}", bindingName);
+    private Map<String, Object> getBindingStateInternal(String bindingName, Object currentState) {
+        return Map.of(
+            "operation", "status",
+            "bindingName", bindingName,
+            "success", true,
+            "state", currentState
+        );
+    }
+    
+    /**
+     * Helper method to change binding state using reflection.
+     */
+    private void changeBindingState(String bindingName, String stateName) throws Exception {
+        logger.info("Attempting to change binding {} to state {}", bindingName, stateName);
         
-        try {
-            var state = bindingsEndpoint.queryState(bindingName);
-            
-            return Map.of(
-                "operation", "getState",
-                "bindingName", bindingName,
-                "success", true,
-                "state", state
-            );
-            
-        } catch (Exception e) {
-            logger.error("Failed to get state for binding {}: {}", bindingName, e.getMessage(), e);
-            return Map.of(
-                "operation", "getState",
-                "bindingName", bindingName,
-                "success", false,
-                "error", e.getMessage()
-            );
+        // Find changeState method that accepts State enum
+        Class<?> bindingsClass = bindingsEndpoint.getClass();
+        java.lang.reflect.Method[] methods = bindingsClass.getMethods();
+        
+        boolean methodFound = false;
+        for (java.lang.reflect.Method method : methods) {
+            if ("changeState".equals(method.getName())) {
+                Class<?>[] paramTypes = method.getParameterTypes();
+                if (paramTypes.length == 2 && 
+                    String.class.equals(paramTypes[0]) && 
+                    paramTypes[1].isEnum()) {
+                    
+                    // Found the enum-based method, get the correct enum value
+                    Object[] enumConstants = paramTypes[1].getEnumConstants();
+                    for (Object enumConstant : enumConstants) {
+                        if (stateName.equals(enumConstant.toString())) {
+                            method.invoke(bindingsEndpoint, bindingName, enumConstant);
+                            logger.info("Successfully called changeState with {} enum", stateName);
+                            methodFound = true;
+                            break;
+                        }
+                    }
+                    if (methodFound) break;
+                }
+            }
+        }
+        
+        if (!methodFound) {
+            throw new RuntimeException("Unable to find appropriate changeState method or enum value for " + stateName);
         }
     }
 }
