@@ -131,4 +131,23 @@ For Cloud Foundry deployment, RabbitMQ configuration comes from service binding 
 3. **Single Responsibility**: Each service should have one clear purpose
 4. **Let CF Handle Service Binding**: Don't override with explicit configuration
 5. **Start with Simple**: Complex injection patterns usually indicate design issues
-6. **Check State Early**: Always verify processing state before expensive operations 
+6. **Check State Early**: Always verify processing state before expensive operations
+7. **Use Correct API Methods**: When using reflection, verify method signatures and parameter types match the actual API
+
+### Follow-up Issue: BindingsEndpoint State Change Reflection Error
+**Issue**: The reflection-based approach to change binding state failed with `ClassNotFoundException: BindingsEndpoint$State`
+
+**Root Cause**: The State enum class is not accessible via standard reflection, or the API has changed
+
+**Solution**: 
+- **Fixed reflection approach** to use `changeState(String bindingName, String state)` method instead of enum
+- **Used string-based states** "STARTED" and "STOPPED" directly
+- **Added proper error handling** and detailed logging
+
+```java
+// Use the changeState method with String-based states
+Method changeStateMethod = bindingsEndpoint.getClass().getMethod("changeState", String.class, String.class);
+Object result = changeStateMethod.invoke(bindingsEndpoint, BINDING_NAME, stateName);
+```
+
+**Result**: Binding state changes now work correctly via the BindingsEndpoint API 

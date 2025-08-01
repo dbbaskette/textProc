@@ -2,14 +2,13 @@ package com.baskettecase.textProc.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.lang.reflect.Method;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.stream.endpoint.BindingsEndpoint;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
-
-
-import java.lang.reflect.Method;
 
 /**
  * Service for managing Spring Cloud Stream binding lifecycle.
@@ -91,25 +90,7 @@ public class ConsumerLifecycleService {
         }
         
         try {
-            // Get the State enum class (it's private, so we need reflection)
-            Class<?> stateClass = Class.forName("org.springframework.cloud.stream.endpoint.BindingsEndpoint$State");
-            Object stateValue = null;
-            
-            logger.debug("Available state enum constants:");
-            for (Object enumConstant : stateClass.getEnumConstants()) {
-                logger.debug("  {}", enumConstant.toString());
-                if (enumConstant.toString().equals(stateName)) {
-                    stateValue = enumConstant;
-                }
-            }
-            
-            if (stateValue == null) {
-                logger.error("Unknown binding state: {}. Available states: {}", 
-                    stateName, java.util.Arrays.toString(stateClass.getEnumConstants()));
-                return;
-            }
-            
-            logger.info("Found state enum value: {} for state: {}", stateValue, stateName);
+            // Use direct start/stop methods instead of complex reflection
             
             // Check current state before change
             try {
@@ -120,11 +101,20 @@ public class ConsumerLifecycleService {
                 logger.warn("Could not query current binding state: {}", e.getMessage());
             }
             
-            // Find and invoke the changeState method
-            Method changeStateMethod = bindingsEndpoint.getClass().getMethod("changeState", String.class, stateClass);
-            Object result = changeStateMethod.invoke(bindingsEndpoint, BINDING_NAME, stateValue);
+            // Use the changeState method with String-based states
+            if ("STARTED".equals(stateName) || "STOPPED".equals(stateName)) {
+                // The changeState method accepts (String bindingName, String state)
+                // We'll use reflection to call it with string parameters
+                Method changeStateMethod = bindingsEndpoint.getClass().getMethod("changeState", String.class, String.class);
+                Object result = changeStateMethod.invoke(bindingsEndpoint, BINDING_NAME, stateName);
+                logger.info("changeState method returned: {}", result);
+            } else {
+                logger.warn("Unsupported state name: {}. Use STARTED or STOPPED.", stateName);
+                return;
+            }
             
-            logger.info("changeState method returned: {}", result);
+            // Wait a moment for the change to take effect
+            Thread.sleep(500);
             
             // Check state after change
             try {
@@ -135,7 +125,7 @@ public class ConsumerLifecycleService {
                 logger.warn("Could not query updated binding state: {}", e.getMessage());
             }
             
-            logger.info("Successfully invoked changeState for binding {} to state {}", BINDING_NAME, stateName);
+            logger.info("Successfully changed binding {} state to {}", BINDING_NAME, stateName);
             
         } catch (Exception e) {
             logger.error("Failed to change binding state for {}: {}", BINDING_NAME, e.getMessage(), e);
