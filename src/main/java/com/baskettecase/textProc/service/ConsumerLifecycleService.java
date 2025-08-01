@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cloud.stream.endpoint.BindingsEndpoint;
+import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +26,26 @@ public class ConsumerLifecycleService {
     
     @Autowired(required = false)
     private BindingsEndpoint bindingsEndpoint;
+    
+    /**
+     * Initialize the binding state to STOPPED when the application context is refreshed.
+     * This ensures that regardless of the auto-startup configuration, the binding starts in STOPPED state
+     * to match the ProcessingStateService default state.
+     */
+    @EventListener
+    public void handleContextRefresh(ContextRefreshedEvent event) {
+        // Use a slight delay to ensure BindingsEndpoint is fully initialized
+        new Thread(() -> {
+            try {
+                Thread.sleep(2000); // 2 second delay
+                logger.info("Initializing binding {} to STOPPED state", BINDING_NAME);
+                changeBindingState("STOPPED");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                logger.warn("Interrupted while initializing binding state");
+            }
+        }).start();
+    }
     
     /**
      * Event listener for processing started events.
@@ -85,6 +106,8 @@ public class ConsumerLifecycleService {
             
         } catch (Exception e) {
             logger.error("Failed to change binding state for {}: {}", BINDING_NAME, e.getMessage(), e);
+            // Don't throw the exception - log it and continue
+            // This prevents the application from failing if there are binding control issues
         }
     }
     

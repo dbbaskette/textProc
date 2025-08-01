@@ -34,6 +34,37 @@ private void changeBindingState(String stateName) {
 - No message loss during disable/enable cycles
 - True pause/resume functionality as documented
 
+### Follow-up Issue: Binding Not Starting in STOPPED State
+**Issue**: Even though ProcessingStateService defaulted to STOPPED, the Spring Cloud Stream binding auto-started, so messages were still being processed on startup
+
+**Root Cause**: Spring Cloud Stream bindings auto-start by default, independent of application logic state
+
+**Solution**: 
+1. **Added auto-startup=false configuration** in application-scdf.properties
+2. **Added initialization logic** in ConsumerLifecycleService to force STOPPED state on startup
+3. **Improved error handling** to prevent application failure if binding control has issues
+
+```properties
+# Consumer binding configuration - start disabled for demo control
+spring.cloud.stream.bindings.textProc-in-0.consumer.auto-startup=false
+```
+
+```java
+@EventListener
+public void handleContextRefresh(ContextRefreshedEvent event) {
+    // Use a delay to ensure BindingsEndpoint is fully initialized
+    new Thread(() -> {
+        Thread.sleep(2000);
+        changeBindingState("STOPPED");
+    }).start();
+}
+```
+
+**Result**: 
+- Application truly starts in disabled state - no message consumption until explicitly started
+- UI start/stop buttons properly control binding lifecycle
+- Consistent behavior between application state and actual message processing
+
 ## Architecture Improvements
 
 ### Problem: Circular Dependency Between Services
