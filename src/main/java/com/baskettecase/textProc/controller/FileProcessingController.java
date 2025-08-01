@@ -235,4 +235,48 @@ public class FileProcessingController {
             "consumerStatus", consumerLifecycleService.getConsumerStatus()
         );
     }
+    
+    /**
+     * Debug endpoint to test binding state directly.
+     * @return JSON response with detailed binding information
+     */
+    @GetMapping("/api/processing/debug")
+    @ResponseBody
+    public Map<String, Object> debugBindingState() {
+        return Map.of(
+            "processingState", processingStateService.getProcessingState(),
+            "isProcessingEnabled", processingStateService.isProcessingEnabled(),
+            "consumerStatus", consumerLifecycleService.getConsumerStatus(),
+            "areConsumersRunning", consumerLifecycleService.areConsumersRunning()
+        );
+    }
+    
+    /**
+     * Debug endpoint to manually test binding state change.
+     * @param state The state to change to (STARTED, STOPPED, PAUSED, RESUMED)
+     * @return JSON response with the result
+     */
+    @PostMapping("/api/processing/debug/binding/{state}")
+    @ResponseBody
+    public Map<String, Object> debugChangeBindingState(@PathVariable String state) {
+        try {
+            // Use reflection to call the private method
+            java.lang.reflect.Method method = consumerLifecycleService.getClass()
+                .getDeclaredMethod("changeBindingState", String.class);
+            method.setAccessible(true);
+            method.invoke(consumerLifecycleService, state);
+            
+            return Map.of(
+                "status", "success",
+                "message", "Attempted to change binding state to " + state,
+                "consumerStatus", consumerLifecycleService.getConsumerStatus()
+            );
+        } catch (Exception e) {
+            return Map.of(
+                "status", "error",
+                "message", "Failed to change binding state: " + e.getMessage(),
+                "consumerStatus", consumerLifecycleService.getConsumerStatus()
+            );
+        }
+    }
 }

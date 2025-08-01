@@ -74,10 +74,20 @@ public class ConsumerLifecycleService {
      * @param stateName The state name ("STARTED", "STOPPED", "PAUSED", "RESUMED")
      */
     private void changeBindingState(String stateName) {
+        logger.info("Attempting to change binding {} state to {}", BINDING_NAME, stateName);
+        
         if (bindingsEndpoint == null) {
             logger.warn("BindingsEndpoint not available, cannot control binding state. " +
                        "Make sure spring-boot-starter-actuator is on the classpath and actuator endpoints are enabled.");
             return;
+        }
+        
+        // First, let's see what bindings are available
+        try {
+            var allBindings = bindingsEndpoint.queryStates();
+            logger.info("Available bindings: {}", allBindings);
+        } catch (Exception e) {
+            logger.warn("Could not query all binding states: {}", e.getMessage());
         }
         
         try {
@@ -85,24 +95,47 @@ public class ConsumerLifecycleService {
             Class<?> stateClass = Class.forName("org.springframework.cloud.stream.endpoint.BindingsEndpoint$State");
             Object stateValue = null;
             
-            // Find the enum constant that matches our state name
+            logger.debug("Available state enum constants:");
             for (Object enumConstant : stateClass.getEnumConstants()) {
+                logger.debug("  {}", enumConstant.toString());
                 if (enumConstant.toString().equals(stateName)) {
                     stateValue = enumConstant;
-                    break;
                 }
             }
             
             if (stateValue == null) {
-                logger.error("Unknown binding state: {}", stateName);
+                logger.error("Unknown binding state: {}. Available states: {}", 
+                    stateName, java.util.Arrays.toString(stateClass.getEnumConstants()));
                 return;
+            }
+            
+            logger.info("Found state enum value: {} for state: {}", stateValue, stateName);
+            
+            // Check current state before change
+            try {
+                var currentBindings = bindingsEndpoint.queryState(BINDING_NAME);
+                logger.info("Current binding {} state before change: {}", BINDING_NAME, 
+                    currentBindings != null && !currentBindings.isEmpty() ? currentBindings.get(0) : "NOT_FOUND");
+            } catch (Exception e) {
+                logger.warn("Could not query current binding state: {}", e.getMessage());
             }
             
             // Find and invoke the changeState method
             Method changeStateMethod = bindingsEndpoint.getClass().getMethod("changeState", String.class, stateClass);
-            changeStateMethod.invoke(bindingsEndpoint, BINDING_NAME, stateValue);
+            Object result = changeStateMethod.invoke(bindingsEndpoint, BINDING_NAME, stateValue);
             
-            logger.info("Successfully changed binding {} state to {}", BINDING_NAME, stateName);
+            logger.info("changeState method returned: {}", result);
+            
+            // Check state after change
+            try {
+                var updatedBindings = bindingsEndpoint.queryState(BINDING_NAME);
+                logger.info("Updated binding {} state after change: {}", BINDING_NAME, 
+                    updatedBindings != null && !updatedBindings.isEmpty() ? updatedBindings.get(0) : "NOT_FOUND");
+            } catch (Exception e) {
+                logger.warn("Could not query updated binding state: {}", e.getMessage());
+            }
+            
+            logger.info("Successfully invoked changeState for binding {} to state {}", BINDING_NAME, stateName);
             
         } catch (Exception e) {
             logger.error("Failed to change binding state for {}: {}", BINDING_NAME, e.getMessage(), e);
