@@ -4,7 +4,7 @@ import com.baskettecase.textProc.config.FileProcessingProperties;
 import com.baskettecase.textProc.model.FileProcessingInfo;
 import com.baskettecase.textProc.service.ExtractionService;
 import com.baskettecase.textProc.service.FileProcessingService;
-import com.baskettecase.textProc.service.ProcessingStateService;
+
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,7 +20,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.support.MessageBuilder;
-import org.springframework.cloud.stream.function.StreamBridge;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 
@@ -34,9 +34,7 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -80,26 +78,20 @@ public class ScdfStreamProcessor {
     private final FileProcessingService fileProcessingService;
     @SuppressWarnings("unused")
     private final FileProcessingProperties fileProcessingProperties;
-    private final ProcessingStateService processingStateService;
     private MinioClient minioClient = null;
     private final Map<String, Boolean> processedFiles = new ConcurrentHashMap<>();
-    private final StreamBridge streamBridge;
     
     @Autowired
     public ScdfStreamProcessor(ExtractionService extractionService, 
                              FileProcessingService fileProcessingService, 
-                             FileProcessingProperties fileProcessingProperties,
-                             ProcessingStateService processingStateService,
-                             StreamBridge streamBridge) {
+                             FileProcessingProperties fileProcessingProperties) {
         this.extractionService = extractionService;
         this.fileProcessingService = fileProcessingService;
         this.fileProcessingProperties = fileProcessingProperties;
-        this.processingStateService = processingStateService;
-        this.streamBridge = streamBridge;
     }
 
     public ScdfStreamProcessor(ExtractionService extractionService, FileProcessingService fileProcessingService) {
-        this(extractionService, fileProcessingService, new FileProcessingProperties(), null, null);
+        this(extractionService, fileProcessingService, new FileProcessingProperties());
     }
 
     private String getFileKey(String url) {
@@ -371,14 +363,6 @@ public class ScdfStreamProcessor {
             String payload = inputMsg.getPayload();
             MessageHeaders headers = inputMsg.getHeaders();
             logger.debug("Received message: {}", payload);
-            
-            // Check if processing is enabled
-            if (!processingStateService.isProcessingEnabled()) {
-                logger.info("Processing is disabled, skipping message: {}", payload);
-                return MessageBuilder.withPayload(new byte[0])
-                        .copyHeaders(inputMsg.getHeaders())
-                        .build();
-            }
         
             try {
                 JsonNode root = objectMapper.readTree(payload);

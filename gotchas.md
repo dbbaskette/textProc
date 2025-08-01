@@ -4,27 +4,35 @@ This document tracks issues encountered during development and their solutions.
 
 ## Processing State Issues
 
-### Problem: Files Processed Even When Disabled
-**Issue**: Application processes files even when processing state is set to STOPPED
+### Problem: Messages Consumed and Lost When Processing Disabled
+**Issue**: Application consumed messages from queue even when processing state was STOPPED, causing messages to be lost permanently when processing was re-enabled
 
-**Root Cause**: The `ScdfStreamProcessor` was not checking the processing state before processing files
+**Root Cause**: Two conflicting mechanisms were used:
+1. `ConsumerLifecycleService` tried to pause traditional `SimpleMessageListenerContainer`
+2. `ScdfStreamProcessor` had a processing state check that consumed but skipped messages
 
-**Solution**: Added processing state check at the beginning of the `textProc()` function
+Spring Cloud Function doesn't use `SimpleMessageListenerContainer`, so the lifecycle service wasn't actually pausing anything. Messages continued flowing to the function where they were consumed and acknowledged even when disabled.
+
+**Solution**: 
+1. **Removed processing state check from ScdfStreamProcessor function** - This was consuming messages
+2. **Updated ConsumerLifecycleService to use Spring Cloud Stream's BindingsEndpoint** - This properly controls binding lifecycle
+3. **Added spring-boot-actuator bindings endpoint** - Required for BindingsEndpoint functionality
+
 ```java
-// Check if processing is enabled
-if (!processingStateService.isProcessingEnabled()) {
-    logger.info("Processing is disabled, skipping message: {}", payload);
-    return MessageBuilder.withPayload(new byte[0])
-            .copyHeaders(inputMsg.getHeaders())
-            .build();
+// NEW: Use BindingsEndpoint to control binding state
+private void changeBindingState(String stateName) {
+    Class<?> stateClass = Class.forName("org.springframework.cloud.stream.endpoint.BindingsEndpoint$State");
+    Object stateValue = // ... find enum constant
+    Method changeStateMethod = bindingsEndpoint.getClass().getMethod("changeState", String.class, stateClass);
+    changeStateMethod.invoke(bindingsEndpoint, BINDING_NAME, stateValue);
 }
 ```
 
 **Result**: 
-- Files are now only processed when processing is enabled
-- When disabled, messages are received but skipped with empty response
-- UI state now correctly reflects actual processing behavior
-- Consumer lifecycle management works as expected
+- When disabled: **Messages remain in the queue** and are not consumed
+- When enabled: Processing resumes and processes queued messages
+- No message loss during disable/enable cycles
+- True pause/resume functionality as documented
 
 ## Architecture Improvements
 

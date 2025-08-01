@@ -77,43 +77,51 @@ RabbitMQ consumers are paused/resumed
 
 ## Stream Processing with State Management
 
-### Processing State Check
+### Binding Lifecycle Management
 
-The `ScdfStreamProcessor` now checks the processing state before processing any files:
+The `ConsumerLifecycleService` now uses Spring Cloud Stream's `BindingsEndpoint` to properly control function binding lifecycle:
 
 ```java
-@Bean
-public Function<Message<String>, Message<byte[]>> textProc() {
-    return inputMsg -> {
-        // Check if processing is enabled
-        if (!processingStateService.isProcessingEnabled()) {
-            logger.info("Processing is disabled, skipping message: {}", payload);
-            return MessageBuilder.withPayload(new byte[0])
-                    .copyHeaders(inputMsg.getHeaders())
-                    .build();
-        }
-        
-        // Process file only if enabled
-        // ... rest of processing logic
-    };
+@Service
+public class ConsumerLifecycleService {
+    private static final String BINDING_NAME = "textProc-in-0";
+    
+    @Autowired(required = false)
+    private BindingsEndpoint bindingsEndpoint;
+    
+    @EventListener
+    public void handleProcessingStarted(ProcessingStartedEvent event) {
+        changeBindingState("STARTED");
+    }
+    
+    @EventListener
+    public void handleProcessingStopped(ProcessingStoppedEvent event) {
+        changeBindingState("STOPPED");
+    }
+    
+    private void changeBindingState(String stateName) {
+        // Uses reflection to access private State enum
+        Class<?> stateClass = Class.forName("org.springframework.cloud.stream.endpoint.BindingsEndpoint$State");
+        // ... reflection code to invoke changeState method
+    }
 }
 ```
 
 ### Processing Flow
 
-1. **Message Received**: RabbitMQ message arrives
-2. **State Check**: Verify if processing is enabled
-3. **Skip or Process**: 
-   - If disabled: Return empty response, skip processing
-   - If enabled: Continue with file processing
-4. **Consumer Management**: Consumers remain active but processing is controlled
+1. **Processing State Change**: User clicks start/stop in UI
+2. **Event Published**: ProcessingStateService publishes event
+3. **Binding Control**: ConsumerLifecycleService changes binding state via BindingsEndpoint
+4. **Queue Behavior**: 
+   - If disabled: **Messages remain in queue**, no consumption occurs
+   - If enabled: Binding resumes, processes queued messages
 
-### Benefits of State Check
+### Benefits of Binding Control
 
-- **Prevents Unwanted Processing**: Files are not processed when disabled
-- **Maintains Message Flow**: Messages are still received but skipped
-- **UI Consistency**: Processing state matches actual behavior
-- **Demo Control**: Perfect for controlled demonstrations
+- **True Pause/Resume**: Messages stay in queue when disabled
+- **No Message Loss**: All messages preserved during disable/enable cycles
+- **Proper Queue Management**: Leverages Spring Cloud Stream's built-in lifecycle
+- **Actuator Integration**: Can be controlled via REST endpoints if needed
 
 ## Original Architecture (Deprecated)
 

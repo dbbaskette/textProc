@@ -48,10 +48,11 @@ This application now includes processing controls to help manage demo timing and
 - Auto-refresh after reset operations
 
 ### SCDF Integration
-- The `ConsumerLifecycleService` manages RabbitMQ consumer lifecycle
-- When stopped, message consumers are paused (no messages consumed from queue)
-- When started, message consumers are resumed and normal processing continues
+- The `ConsumerLifecycleService` manages Spring Cloud Stream binding lifecycle
+- When stopped, the function binding is stopped (no messages consumed from queue)
+- When started, the function binding is resumed and normal processing continues
 - Messages remain in the queue when processing is disabled
+- Uses Spring Cloud Stream's BindingsEndpoint for proper lifecycle control
 
 ## Configuration
 
