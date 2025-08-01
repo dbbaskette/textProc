@@ -3,9 +3,8 @@ package com.baskettecase.textProc.service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.lang.reflect.Method;
+import com.baskettecase.textProc.endpoint.StreamControlEndpoint;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.cloud.stream.endpoint.BindingsEndpoint;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
@@ -13,7 +12,7 @@ import org.springframework.stereotype.Service;
 /**
  * Service for managing Spring Cloud Stream binding lifecycle.
  * Listens to processing state events and manages consumer bindings accordingly.
- * Uses Spring Cloud Stream's BindingsEndpoint to properly pause/resume bindings
+ * Uses a custom StreamControlEndpoint to properly pause/resume bindings
  * ensuring messages remain in the queue when processing is disabled.
  */
 @Service
@@ -24,7 +23,7 @@ public class ConsumerLifecycleService {
     private static final String BINDING_NAME = "textProc-in-0";
     
     @Autowired(required = false)
-    private BindingsEndpoint bindingsEndpoint;
+    private StreamControlEndpoint streamControlEndpoint;
     
     /**
      * Initialize the binding state to STOPPED when the application context is refreshed.
@@ -33,7 +32,7 @@ public class ConsumerLifecycleService {
      */
     @EventListener
     public void handleContextRefresh(ContextRefreshedEvent event) {
-        // Use a slight delay to ensure BindingsEndpoint is fully initialized
+        // Use a slight delay to ensure StreamControlEndpoint is fully initialized
         new Thread(() -> {
             try {
                 Thread.sleep(2000); // 2 second delay
@@ -67,65 +66,30 @@ public class ConsumerLifecycleService {
     }
     
     /**
-     * Changes the state of the Spring Cloud Stream binding using the BindingsEndpoint.
-     * Uses reflection to access the private State enum and changeState method.
+     * Change the state of the binding using the StreamControlEndpoint.
      * 
-     * @param stateName The state name ("STARTED", "STOPPED", "PAUSED", "RESUMED")
+     * @param stateName The state name ("STARTED" or "STOPPED")
      */
     private void changeBindingState(String stateName) {
         logger.info("Attempting to change binding {} state to {}", BINDING_NAME, stateName);
         
-        if (bindingsEndpoint == null) {
-            logger.warn("BindingsEndpoint not available, cannot control binding state. " +
+        if (streamControlEndpoint == null) {
+            logger.warn("StreamControlEndpoint not available, cannot control binding state. " +
                        "Make sure spring-boot-starter-actuator is on the classpath and actuator endpoints are enabled.");
             return;
         }
         
-        // First, let's see what bindings are available
         try {
-            var allBindings = bindingsEndpoint.queryStates();
-            logger.info("Available bindings: {}", allBindings);
-        } catch (Exception e) {
-            logger.warn("Could not query all binding states: {}", e.getMessage());
-        }
-        
-        try {
-            // Use direct start/stop methods instead of complex reflection
-            
-            // Check current state before change
-            try {
-                var currentBindings = bindingsEndpoint.queryState(BINDING_NAME);
-                logger.info("Current binding {} state before change: {}", BINDING_NAME, 
-                    currentBindings != null && !currentBindings.isEmpty() ? currentBindings.get(0) : "NOT_FOUND");
-            } catch (Exception e) {
-                logger.warn("Could not query current binding state: {}", e.getMessage());
-            }
-            
-            // Use the changeState method with String-based states
-            if ("STARTED".equals(stateName) || "STOPPED".equals(stateName)) {
-                // The changeState method accepts (String bindingName, String state)
-                // We'll use reflection to call it with string parameters
-                Method changeStateMethod = bindingsEndpoint.getClass().getMethod("changeState", String.class, String.class);
-                Object result = changeStateMethod.invoke(bindingsEndpoint, BINDING_NAME, stateName);
-                logger.info("changeState method returned: {}", result);
+            if ("STARTED".equals(stateName)) {
+                var result = streamControlEndpoint.startBinding(BINDING_NAME);
+                logger.info("Start binding result: {}", result);
+            } else if ("STOPPED".equals(stateName)) {
+                var result = streamControlEndpoint.stopBinding(BINDING_NAME);
+                logger.info("Stop binding result: {}", result);
             } else {
                 logger.warn("Unsupported state name: {}. Use STARTED or STOPPED.", stateName);
                 return;
             }
-            
-            // Wait a moment for the change to take effect
-            Thread.sleep(500);
-            
-            // Check state after change
-            try {
-                var updatedBindings = bindingsEndpoint.queryState(BINDING_NAME);
-                logger.info("Updated binding {} state after change: {}", BINDING_NAME, 
-                    updatedBindings != null && !updatedBindings.isEmpty() ? updatedBindings.get(0) : "NOT_FOUND");
-            } catch (Exception e) {
-                logger.warn("Could not query updated binding state: {}", e.getMessage());
-            }
-            
-            logger.info("Successfully changed binding {} state to {}", BINDING_NAME, stateName);
             
         } catch (Exception e) {
             logger.error("Failed to change binding state for {}: {}", BINDING_NAME, e.getMessage(), e);
@@ -139,18 +103,16 @@ public class ConsumerLifecycleService {
      * @return true if binding is running, false otherwise
      */
     public boolean areConsumersRunning() {
-        if (bindingsEndpoint == null) {
+        if (streamControlEndpoint == null) {
             return false;
         }
         
         try {
-            var bindings = bindingsEndpoint.queryState(BINDING_NAME);
-            if (bindings != null && !bindings.isEmpty()) {
-                var binding = bindings.get(0);
-                // Use reflection to access the state since the API might vary
-                Method getStateMethod = binding.getClass().getMethod("getState");
-                Object state = getStateMethod.invoke(binding);
-                return "STARTED".equals(state.toString());
+            var stateResult = streamControlEndpoint.getBindingState(BINDING_NAME);
+            if (stateResult != null && Boolean.TRUE.equals(stateResult.get("success"))) {
+                var state = stateResult.get("state");
+                // Check if the state indicates running
+                return state != null && state.toString().contains("running");
             }
             return false;
         } catch (Exception e) {
@@ -164,23 +126,30 @@ public class ConsumerLifecycleService {
      * @return A string describing the binding status
      */
     public String getConsumerStatus() {
-        if (bindingsEndpoint == null) {
-            return "BindingsEndpoint not available";
+        if (streamControlEndpoint == null) {
+            return "StreamControlEndpoint not available";
         }
         
         try {
-            var bindings = bindingsEndpoint.queryState(BINDING_NAME);
-            if (bindings != null && !bindings.isEmpty()) {
-                var binding = bindings.get(0);
-                // Use reflection to access the state since the API might vary
-                Method getStateMethod = binding.getClass().getMethod("getState");
-                Object state = getStateMethod.invoke(binding);
-                return String.format("Binding %s: %s", BINDING_NAME, state.toString());
-            } else {
-                return String.format("Binding %s: NOT_FOUND", BINDING_NAME);
+            var stateResult = streamControlEndpoint.getBindingState(BINDING_NAME);
+            if (stateResult != null && Boolean.TRUE.equals(stateResult.get("success"))) {
+                var state = stateResult.get("state");
+                if (state != null) {
+                    // Extract meaningful status from the state information
+                    String stateStr = state.toString();
+                    if (stateStr.contains("state=running")) {
+                        return "Binding " + BINDING_NAME + ": running";
+                    } else if (stateStr.contains("state=stopped")) {
+                        return "Binding " + BINDING_NAME + ": stopped";
+                    } else {
+                        return "Binding " + BINDING_NAME + ": " + stateStr;
+                    }
+                }
             }
+            return "Binding " + BINDING_NAME + ": unknown";
         } catch (Exception e) {
-            return String.format("Binding %s: ERROR (%s)", BINDING_NAME, e.getMessage());
+            logger.warn("Failed to get binding status: {}", e.getMessage());
+            return "Binding " + BINDING_NAME + ": error - " + e.getMessage();
         }
     }
-} 
+}
