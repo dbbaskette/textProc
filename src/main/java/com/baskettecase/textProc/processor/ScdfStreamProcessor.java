@@ -289,7 +289,7 @@ public class ScdfStreamProcessor {
         String processedFilePath = "/processed_files/" + encodedFilename + ".txt";
         
         // Build the WebHDFS CREATE URL
-        String createUrl = baseUrl + processedFilePath + "?op=CREATE&overwrite=true";
+        String createUrl = baseUrl + processedFilePath + "?op=CREATE&overwrite=true&user.name=HDFS";
         
         logger.info("Writing processed file to HDFS: {}", createUrl);
         
