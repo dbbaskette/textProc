@@ -286,7 +286,7 @@ public class ScdfStreamProcessor {
         String encodedFilename = java.net.URLEncoder.encode(filename, StandardCharsets.UTF_8.name());
         
         // Create the processed files directory path with encoded filename
-        String processedFilePath = "/processed_files/" + encodedFilename + ".txt";
+        String processedFilePath = "/user/HDFS/processed_files/" + encodedFilename + ".txt";
         
         // Build the WebHDFS CREATE URL
         String createUrl = baseUrl + processedFilePath + "?op=CREATE&overwrite=true&user.name=HDFS";
