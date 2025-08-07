@@ -84,6 +84,13 @@ public void handleContextRefresh(ContextRefreshedEvent event) {
 - Can add more listeners without modifying existing services
 - Better follows Single Responsibility Principle
 
+## Headless API Migration
+
+### Note: RabbitMQ Queue Depth in SCDF
+- Queue depth reporting via `/api/files/pending` requires RabbitMQ Management API
+- Configure env vars: `RABBITMQ_MGMT_URL`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD`
+- If not set, the endpoint returns `{ status: "unavailable" }`
+
 ### Event Classes:
 - `ProcessingStartedEvent` - Published when processing is enabled
 - `ProcessingStoppedEvent` - Published when processing is disabled

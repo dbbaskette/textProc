@@ -1,19 +1,16 @@
 # Processing Controls
 
-This application now includes processing controls to help manage demo timing and file processing operations.
+This application exposes headless management endpoints for orchestration by an external app.
 
 ## Controls Overview
 
 ### Start Processing
-- **Button**: Green "Start Processing" button with play icon
-- **Action**: Enables file processing
-- **Effect**: The application will begin processing incoming files from the stream
-- **Default State**: Processing is **STOPPED** by default
+- REST: `POST /api/processing/start`
+- Effect: Enables processing (SCDF bindings STARTED)
 
 ### Stop Processing
-- **Button**: Yellow "Stop Processing" button with pause icon
-- **Action**: Disables file processing
-- **Effect**: The application will stop processing incoming files (messages are still received but ignored)
+- REST: `POST /api/processing/stop`
+- Effect: Disables processing (SCDF bindings STOPPED)
 
 ### Reset
 - **Button**: Red "Reset" button with refresh icon
@@ -38,14 +35,10 @@ This application now includes processing controls to help manage demo timing and
 - `ProcessingStateService`: Manages start/stop state using atomic boolean
 - `ConsumerLifecycleService`: Manages RabbitMQ consumer lifecycle (pause/resume)
 - `HdfsService`: Handles HDFS operations for reset functionality
-- REST endpoints: `/api/processing/start`, `/api/processing/stop`, `/api/processing/reset`
+- REST endpoints: `/api/processing/start`, `/api/processing/stop`, `/api/processing/reset`, `/api/processing/state`, `/api/files/processed`, `/api/files/pending`
 
-### Frontend Features
-- Real-time status display with color-coded badges
-- Consumer status display showing active/paused consumers
-- Confirmation dialog for reset operation
-- Toast notifications for operation feedback
-- Auto-refresh after reset operations
+### Frontend
+- The built-in UI has been removed. Integrate with these APIs from your external app.
 
 ### SCDF Integration
 - The `ConsumerLifecycleService` manages Spring Cloud Stream binding lifecycle

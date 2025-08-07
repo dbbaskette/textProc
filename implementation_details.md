@@ -136,8 +136,8 @@ This required complex injection patterns with `@Lazy` annotations and was diffic
 ### Components
 
 #### Web Layer
-- **FileProcessingController**: REST endpoints for start/stop/reset operations
-- **Templates**: Thymeleaf templates with JavaScript for real-time updates
+- **ProcessingApiController**: REST endpoints for start/stop/reset/state and files listing
+- UI removed; headless API designed for external orchestrator
 
 #### Service Layer  
 - **ProcessingStateService**: Central state management with event publishing

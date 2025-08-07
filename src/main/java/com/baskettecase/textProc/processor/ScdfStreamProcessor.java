@@ -9,9 +9,6 @@ import com.baskettecase.textProc.service.FileProcessingService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import io.minio.MinioClient;
-import io.minio.GetObjectArgs;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -78,7 +75,6 @@ public class ScdfStreamProcessor {
     private final FileProcessingService fileProcessingService;
     @SuppressWarnings("unused")
     private final FileProcessingProperties fileProcessingProperties;
-    private MinioClient minioClient = null;
     private final Map<String, Boolean> processedFiles = new ConcurrentHashMap<>();
     
     @Autowired
@@ -111,37 +107,7 @@ public class ScdfStreamProcessor {
         }
     }
 
-    private MinioClient getMinioClient() {
-        if (minioClient == null) {
-            String endpoint = System.getenv().getOrDefault("S3_ENDPOINT", "http://localhost:9000");
-            String accessKey = System.getenv("S3_ACCESS_KEY");
-            String secretKey = System.getenv("S3_SECRET_KEY");
-            logger.atDebug().log("MinIO config: endpoint={}, accessKey={}, secretKey={}", endpoint, accessKey, "***");
-            if (accessKey == null || secretKey == null) {
-                throw new IllegalStateException("S3_ACCESS_KEY and S3_SECRET_KEY environment variables must be set");
-            }
-            minioClient = MinioClient.builder()
-                    .endpoint(endpoint)
-                    .credentials(accessKey, secretKey)
-                    .build();
-        }
-        return minioClient;
-    }
-    
-    private String processS3File(JsonNode root) throws Exception {
-        String bucket = root.get("bucket").asText();
-        String key = root.get("key").asText();
-        logger.info("Processing S3 object: {}/{}", bucket, key);
-        
-        java.nio.file.Path tempFile = Files.createTempFile("s3-", "-" + key);
-        try (InputStream stream = getMinioClient().getObject(
-                GetObjectArgs.builder().bucket(bucket).object(key).build())) {
-            Files.copy(stream, tempFile, StandardCopyOption.REPLACE_EXISTING);
-            return extractionService.extractTextFromFile(tempFile);
-        } finally {
-            Files.deleteIfExists(tempFile);
-        }
-    }
+    // S3 support removed per requirements (HDFS only)
     
     private Path downloadHdfsFile(String webhdfsUrl) throws IOException {
         logger.info("Downloading WebHDFS file: {}", webhdfsUrl);
@@ -294,7 +260,7 @@ public class ScdfStreamProcessor {
         logger.info("Writing processed file to HDFS: {}", createUrl);
         
         // Create HTTP connection
-        java.net.URL url = new java.net.URL(createUrl);
+        java.net.URL url = java.net.URI.create(createUrl).toURL();
         java.net.HttpURLConnection connection = (java.net.HttpURLConnection) url.openConnection();
         connection.setRequestMethod("PUT");
         connection.setDoOutput(true);
@@ -370,14 +336,6 @@ public class ScdfStreamProcessor {
                 String webhdfsUrl;
 
                     switch (type.toUpperCase()) {
-                        case "S3":
-                            // For S3, we'll keep the existing behavior for now
-                            String extractedText = processS3File(root);
-                            logger.info("Extraction complete ({} chars)", extractedText.length());
-                            return MessageBuilder.withPayload(extractedText.getBytes(StandardCharsets.UTF_8))
-                                    .copyHeaders(inputMsg.getHeaders())
-                                    .build();
-                            
                         case "HDFS":
                             webhdfsUrl = root.path("url").asText();
                             if (webhdfsUrl == null || webhdfsUrl.trim().isEmpty()) {
@@ -440,14 +398,6 @@ public class ScdfStreamProcessor {
                                 // Log processing information
                                 logger.info("Extracted {} characters from file: {}", processedText.length(), webhdfsUrl);
                                 
-                                // Write processed text to temp file for UI display
-                                try {
-                                    Path tempTextFile = extractionService.writeExtractedTextToTempFile(filename, processedText);
-                                    logger.debug("Saved processed text for UI display: {}", tempTextFile);
-                                } catch (Exception e) {
-                                    logger.warn("Failed to write processed text to temp file for {}: {}", filename, e.getMessage());
-                                }
-                                
                                 // Write the full processed text to HDFS
                                 String processedFileUrl = writeProcessedFileToHdfs(webhdfsUrl, filename, processedText);
                                 logger.info("Successfully wrote processed file to HDFS: {}", processedFileUrl);
@@ -475,7 +425,7 @@ public class ScdfStreamProcessor {
                             }
                             
                         default:
-                            throw new IllegalArgumentException("Unsupported file source type: " + type);
+                            throw new IllegalArgumentException("Unsupported file source type: " + type + ". Only HDFS is supported.");
                     }
                     
                 } catch (Exception e) {
