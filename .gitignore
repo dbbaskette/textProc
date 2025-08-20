@@ -19,3 +19,5 @@ build.sh
 *.log
 release.sh
 .release-exec
+*.yml
+*.properties
