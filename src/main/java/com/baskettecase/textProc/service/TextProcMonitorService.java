@@ -315,9 +315,35 @@ public class TextProcMonitorService {
     }
 
     private static String resolvePublicHostname(String fallback) {
+        // 1. Check for explicit override
         String env = System.getenv("PUBLIC_HOSTNAME");
         if (env != null && !env.isBlank()) return env;
+        
+        // 2. Try to extract from VCAP_APPLICATION (Cloud Foundry) - same as hdfsWatcher
+        String vcapHostname = extractHostnameFromVcap();
+        if (vcapHostname != null) return vcapHostname;
+        
         return fallback;
+    }
+    
+    private static String extractHostnameFromVcap() {
+        String vcapApplicationJson = System.getenv("VCAP_APPLICATION");
+        if (vcapApplicationJson != null) {
+            try {
+                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                com.fasterxml.jackson.core.type.TypeReference<java.util.Map<String, Object>> typeRef = 
+                    new com.fasterxml.jackson.core.type.TypeReference<java.util.Map<String, Object>>() {};
+                java.util.Map<String, Object> vcapMap = mapper.readValue(vcapApplicationJson, typeRef);
+                @SuppressWarnings("unchecked")
+                java.util.List<String> uris = (java.util.List<String>) vcapMap.get("application_uris");
+                if (uris != null && !uris.isEmpty()) {
+                    return uris.get(0).toLowerCase();
+                }
+            } catch (Exception e) {
+                // Fall through to default if parsing fails
+            }
+        }
+        return null;
     }
 
     private static Integer resolvePort() {
@@ -336,7 +362,14 @@ public class TextProcMonitorService {
     private static String resolvePublicUrl(String publicHostname, Integer port) {
         String env = System.getenv("PUBLIC_URL");
         if (env != null && !env.isBlank()) return env;
-        return "https://" + publicHostname;
+        
+        // Use HTTPS for public hostname (same as hdfsWatcher)
+        if (publicHostname != null && !publicHostname.isBlank()) {
+            return "https://" + publicHostname;
+        }
+        
+        // Fallback to localhost with port
+        return "http://localhost:" + port;
     }
 
     private static String resolveUrl(String publicHost, String host) {
