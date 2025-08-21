@@ -3,6 +3,8 @@ package com.baskettecase.textProc.service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -14,6 +16,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ProcessingStateService {
     private final AtomicBoolean isProcessingEnabled = new AtomicBoolean(false); // Default to stopped
     private final ApplicationEventPublisher eventPublisher;
+    
+    // State change tracking fields
+    private volatile OffsetDateTime lastStateChange = OffsetDateTime.now(ZoneOffset.UTC);
+    private volatile String lastChangeReason = "Application startup";
     
     @Autowired
     public ProcessingStateService(ApplicationEventPublisher eventPublisher) {
@@ -30,18 +36,32 @@ public class ProcessingStateService {
     
     /**
      * Enables file processing and publishes a start event.
+     * @return true if state changed, false if already enabled
      */
-    public void startProcessing() {
-        isProcessingEnabled.set(true);
-        eventPublisher.publishEvent(new ProcessingStartedEvent(this));
+    public boolean startProcessing() {
+        boolean previousState = isProcessingEnabled.getAndSet(true);
+        if (!previousState) {
+            lastStateChange = OffsetDateTime.now(ZoneOffset.UTC);
+            lastChangeReason = "Processing started via API";
+            eventPublisher.publishEvent(new ProcessingStartedEvent(this));
+            return true; // State changed
+        }
+        return false; // State didn't change
     }
     
     /**
      * Disables file processing and publishes a stop event.
+     * @return true if state changed, false if already disabled
      */
-    public void stopProcessing() {
-        isProcessingEnabled.set(false);
-        eventPublisher.publishEvent(new ProcessingStoppedEvent(this));
+    public boolean stopProcessing() {
+        boolean previousState = isProcessingEnabled.getAndSet(false);
+        if (previousState) {
+            lastStateChange = OffsetDateTime.now(ZoneOffset.UTC);
+            lastChangeReason = "Processing stopped via API";
+            eventPublisher.publishEvent(new ProcessingStoppedEvent(this));
+            return true; // State changed
+        }
+        return false; // State didn't change
     }
     
     /**
@@ -50,6 +70,22 @@ public class ProcessingStateService {
      */
     public String getProcessingState() {
         return isProcessingEnabled.get() ? "STARTED" : "STOPPED";
+    }
+    
+    /**
+     * Gets the timestamp of the last state change.
+     * @return OffsetDateTime of the last state change
+     */
+    public OffsetDateTime getLastChanged() {
+        return lastStateChange;
+    }
+    
+    /**
+     * Gets the reason for the last state change.
+     * @return String describing the reason for the last state change
+     */
+    public String getLastChangeReason() {
+        return lastChangeReason;
     }
     
     /**
