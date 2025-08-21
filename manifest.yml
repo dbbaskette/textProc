@@ -2,7 +2,7 @@ applications:
 - name: textProc
   instances: 1
   memory: 1G
-  path: ./target/textProc-2.0.2.jar
+  path: ./target/textProc-2.0.3.jar
   buildpacks:
     - java_buildpack_offline
   

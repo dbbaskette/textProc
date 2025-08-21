@@ -70,6 +70,26 @@ public class ProcessingApiController {
         );
     }
 
+    @PostMapping("/processing/toggle")
+    public Map<String, Object> toggleProcessing() {
+        boolean wasEnabled = processingStateService.isProcessingEnabled();
+        if (wasEnabled) {
+            processingStateService.stopProcessing();
+        } else {
+            processingStateService.startProcessing();
+        }
+        
+        String action = wasEnabled ? "stopped" : "started";
+        return Map.of(
+                "status", "success",
+                "message", "Processing " + action,
+                "previousState", wasEnabled ? "enabled" : "disabled",
+                "currentState", processingStateService.isProcessingEnabled() ? "enabled" : "disabled",
+                "processingState", processingStateService.getProcessingState(),
+                "consumerStatus", consumerLifecycleService.getConsumerStatus()
+        );
+    }
+
     @PostMapping("/processing/reset")
     public Map<String, Object> resetProcessing() {
         processingStateService.stopProcessing();
