@@ -86,6 +86,12 @@ public class ScdfStreamProcessor {
         this.fileProcessingProperties = fileProcessingProperties;
     }
 
+    public void clearProcessedFiles() {
+        int fileCount = processedFiles.size();
+        processedFiles.clear();
+        logger.info("Cleared processed files cache - {} files removed", fileCount);
+    }
+
     public ScdfStreamProcessor(ExtractionService extractionService, FileProcessingService fileProcessingService) {
         this(extractionService, fileProcessingService, new FileProcessingProperties());
     }

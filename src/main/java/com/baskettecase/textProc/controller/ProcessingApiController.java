@@ -1,11 +1,13 @@
 package com.baskettecase.textProc.controller;
 
 import com.baskettecase.textProc.model.FileProcessingInfo;
+import com.baskettecase.textProc.processor.ScdfStreamProcessor;
 import com.baskettecase.textProc.service.ConsumerLifecycleService;
 import com.baskettecase.textProc.service.FileProcessingService;
 import com.baskettecase.textProc.service.HdfsService;
 import com.baskettecase.textProc.service.PendingFilesService;
 import com.baskettecase.textProc.service.ProcessingStateService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -26,6 +28,9 @@ public class ProcessingApiController {
     private final ConsumerLifecycleService consumerLifecycleService;
     private final HdfsService hdfsService;
     private final PendingFilesService pendingFilesService;
+    
+    @Autowired(required = false)
+    private ScdfStreamProcessor scdfStreamProcessor;
 
     public ProcessingApiController(
             FileProcessingService fileProcessingService,
@@ -141,6 +146,12 @@ public class ProcessingApiController {
     public Map<String, Object> resetProcessing() {
         processingStateService.stopProcessing();
         fileProcessingService.clearProcessedFiles();
+        
+        // Clear SCDF processor cache if available (only when SCDF profile is active)
+        if (scdfStreamProcessor != null) {
+            scdfStreamProcessor.clearProcessedFiles();
+        }
+        
         boolean hdfsCleared = hdfsService.deleteProcessedFilesDirectory();
         boolean directoryRecreated = hdfsService.createProcessedFilesDirectory();
         return Map.of(
